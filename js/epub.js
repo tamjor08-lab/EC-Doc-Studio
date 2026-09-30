@@ -665,12 +665,12 @@
 
         '<item id="css" ' +
         'href="styles.css" ' +
-        'media-type="text/css"/>'
-      ];
+        'media-type="text/css"/>','<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
+];
 
       const spine = [];
       const nav = [];
-
+      const ncx = [];
       st.chapters.forEach(
         (chapter, index) => {
           const filename =
@@ -737,7 +737,25 @@
               )
             }` +
             '</a></li>'
-          );
+          );ncx.push(
+  '<navPoint id="navPoint-' +
+  (index + 1) +
+  '" playOrder="' +
+  (index + 1) +
+  '">' +
+  '<navLabel><text>' +
+  esc(
+    chapterTitle(
+      chapter,
+      index
+    )
+  ) +
+  '</text></navLabel>' +
+  '<content src="' +
+  filename +
+  '"/>' +
+  '</navPoint>'
+);
         }
       );
 
@@ -784,7 +802,23 @@
         '</body>' +
         '</html>'
       );
-
+      folder.file(
+  'toc.ncx',
+  '<?xml version="1.0" encoding="UTF-8"?>' +
+  '<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">' +
+  '<head>' +
+  '<meta name="dtb:uid" content="' +
+  esc(id) +
+  '"/>' +
+  '</head>' +
+  '<docTitle><text>' +
+  esc(bookTitle) +
+  '</text></docTitle>' +
+  '<navMap>' +
+  ncx.join('') +
+  '</navMap>' +
+  '</ncx>'
+);
       folder.file(
         'content.opf',
         '<?xml version="1.0"?>' +
@@ -825,7 +859,7 @@
         `<manifest>` +
         `${manifest.join('')}` +
         '</manifest>' +
-        `<spine>` +
+        `<spine toc="ncx">` +
         `${spine.join('')}` +
         '</spine>' +
         '</package>'
