@@ -1,0 +1,2 @@
+document.getElementById('htmlToText').onclick=()=>{const d=document.createElement('div');d.innerHTML=document.getElementById('editor').value;downloadFile('converted.txt','text/plain',d.textContent||d.innerText||document.getElementById('editor').value);};
+/* Future integrations: DOCX↔PDF, DOCX→EPUB, EPUB→PDF. Keep conversion-specific code here. */
