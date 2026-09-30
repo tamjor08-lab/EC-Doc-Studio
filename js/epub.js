@@ -2,7 +2,7 @@
   if (!file) return;
 
   try {
-    Status("Opening DOCX…");
+    status("Opening DOCX…");
 
     const arrayBuffer = await file.arrayBuffer();
 
