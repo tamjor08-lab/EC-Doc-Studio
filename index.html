@@ -4,6 +4,95 @@
 <section class="workspace"><div id="home" class="pane active"><h2>Document workspaces</h2><div class="cards"><div class="card"><h3>EPUB Workspace</h3><p>Open DOCX or EPUB, navigate chapters from a fixed sidebar, edit chapter content, and export EPUB.</p><button class="btn jump" data-go="epub">Open EPUB Workspace</button></div><div class="card"><h3>PDF Workspace</h3><p>Open and view real PDF pages, zoom, rotate/delete pages, add text, save PDF, or export extracted text to DOCX.</p><button class="btn jump" data-go="pdf">Open PDF Workspace</button></div></div></div>
 <div id="epub" class="pane"><div class="workspace-head"><div><h2>EPUB Workspace</h2><p>Open a Word manuscript or an EPUB. The navigation stays beside the book while you read or edit.</p></div><div class="actions"><label class="btn file">Open DOCX<input id="docxFile" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label><label class="btn secondary file">Open EPUB<input id="openEpub" type="file" accept=".epub,application/epub+zip"></label></div></div>
 <div id="epubStatus" class="status">No book loaded.</div><div class="book-workspace"><aside class="book-side"><h3>Contents</h3><div id="bookToc" class="toc"><span class="muted">Chapters will appear here.</span></div><div class="side-nav"><button id="prevChapter" class="btn secondary" disabled>Previous</button><button id="nextChapter" class="btn secondary" disabled>Next</button></div><hr><button id="editChapter" class="btn secondary" disabled>Edit chapter</button><button id="saveChapter" class="btn" hidden>Save chapter</button><button id="cancelEdit" class="btn secondary" hidden>Cancel</button><hr><label>Text size<input id="readerSize" type="range" min="85" max="145" value="100" step="5"></label><button id="readerTheme" class="btn secondary">Dark reader</button></aside><section class="book-main"><div class="book-meta"><label>Title<input id="bookTitle" type="text"></label><label>Author<input id="bookAuthor" type="text"></label><label>Language<input id="bookLang" type="text" value="en"></label><label>Split<select id="chapterSplit"><option value="h1">Heading 1</option><option value="h12">Heading 1 + 2</option><option value="none">One chapter</option></select></label></div><article id="bookPage" class="book-page"><p class="muted">Open a DOCX or EPUB to begin.</p></article><div class="exportbar"><button id="buildEpub" class="btn" disabled>Save as EPUB</button></div><details id="conversionNotes" hidden><summary id="conversionSummary"></summary><ul id="conversionList"></ul></details></section></div></div>
-<div id="pdf" class="pane"><div class="workspace-head"><div><h2>PDF Workspace</h2><p>View the actual PDF inside EC Doc Studio, then work with the visible document.</p></div><div class="actions"><label class="btn file">Open PDF<input id="pdfFile" type="file" accept=".pdf,application/pdf"></label><button id="savePdf" class="btn secondary" disabled>Save PDF</button><button id="exportDocx" class="btn secondary" disabled>Export DOCX</button></div></div><div id="pdfStatus" class="status">No PDF loaded.</div><div id="pdfTools" class="pdf-tools" hidden><button id="zoomOut" class="btn secondary">−</button><span id="zoomLabel">100%</span><button id="zoomIn" class="btn secondary">+</button><label>Page <input id="pdfPage" type="number" min="1" value="1"></label><button id="rotatePage" class="btn secondary">Rotate page</button><button id="deletePage" class="btn danger">Delete page</button><label class="grow">Add text <input id="pdfText" type="text" placeholder="Type text, then click on the page"></label><button id="textMode" class="btn secondary">Place text</button></div><div id="pdfViewer" class="pdf-viewer"><div class="pdf-empty">Your PDF pages will appear here.</div></div><p class="muted small">DOCX export reconstructs readable text from the PDF. Complex page layout, fonts, columns and images may not reproduce exactly.</p></div>
-<div id="print" class="pane"><h2>Print / Hardbound</h2><div class="card"><h3>Book-production workspace</h3><p>Reserved for trim size, gutter/mirrored margins, bleed, chapter starts, headers/footers, pagination and print-ready PDF preparation.</p></div></div></section></main><footer>EC Doc Studio • by Elemental Cre8tions</footer>
+<div id="pdf" class="pane">
+  <div class="workspace-head">
+    <div>
+      <h2>PDF Workspace</h2>
+      <p>Open and read the original PDF, or switch to an editable document when you need to make changes.</p>
+    </div>
+
+    <div class="actions">
+      <label class="btn file">
+        Open PDF
+        <input id="pdfFile" type="file" accept=".pdf,application/pdf">
+      </label>
+
+      <button id="editPdfDocument" class="btn secondary" disabled>
+        Edit Document
+      </button>
+
+      <button id="savePdf" class="btn secondary" disabled>
+        Save PDF
+      </button>
+
+      <button id="savePdfDocx" class="btn secondary" disabled>
+        Save DOCX
+      </button>
+    </div>
+  </div>
+
+  <div id="pdfStatus" class="status">
+    No PDF loaded.
+  </div>
+
+  <div id="pdfViewerMode">
+
+    <div id="pdfViewTools" class="pdf-tools" hidden>
+      <button id="zoomOut" class="btn secondary" type="button">
+        −
+      </button>
+
+      <span id="zoomLabel">
+        100%
+      </span>
+
+      <button id="zoomIn" class="btn secondary" type="button">
+        +
+      </button>
+
+      <button id="goToPdfEditor" class="btn" type="button">
+        Edit Document
+      </button>
+    </div>
+
+    <div id="pdfViewer" class="pdf-viewer">
+      <div class="pdf-empty">
+        Your PDF pages will appear here.
+      </div>
+    </div>
+  </div>
+
+  <div id="pdfEditorMode" hidden>
+
+    <div
+      id="pdfEditorToolbar"
+      class="pdf-tools"
+      style="position:sticky;top:0;z-index:10;"
+    >
+      <button id="viewOriginalPdf" class="btn secondary" type="button">
+        View Original PDF
+      </button>
+
+      <button id="saveEditorDocx" class="btn" type="button">
+        Save DOCX
+      </button>
+
+      <span class="muted">
+        Click directly in the document to edit. Use your keyboard normally: type, select, Backspace or Delete.
+      </span>
+    </div>
+
+    <div
+      id="pdfEditableDocument"
+      class="pdf-editable-document"
+      contenteditable="true"
+      spellcheck="true"
+    >
+    </div>
+  </div>
+
+  <p class="muted small">
+    EC Doc Studio reconstructs editable text from the PDF. PDF files do not contain the same paragraph and formatting structure as Word documents, so some formatting may need adjustment after conversion.
+  </p>
+</div>
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script><script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script><script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs" type="module"></script><script src="js/app.js"></script><script src="js/epub.js"></script><script type="module" src="js/pdf.js"></script></body></html>
