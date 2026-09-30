@@ -1,64 +1,1223 @@
-(()=>{'use strict';const $=s=>document.querySelector(s),EXT={'image/png':'png','image/jpeg':'jpg','image/gif':'gif','image/svg+xml':'svg','image/webp':'webp'};let st={html:'',doc:null,chapters:[],current:0,images:new Map(),notes:[],cover:null,external:false};const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');function status(s){$('#epubStatus').textContent=s}function sanitize(d){d.querySelectorAll('script,style,iframe,object,embed,link,meta,form').forEach(e=>e.remove());d.querySelectorAll('*').forEach(e=>[...e.attributes].forEach(a=>{if(/^on/i.test(a.name))e.removeAttribute(a.name)}))}function split(d,mode){let out=[],cur={title:null,nodes:[]},br=e=>mode==='h1'?e.tagName==='H1':mode==='h12'?['H1','H2'].includes(e.tagName):false,has=c=>c.nodes.some(n=>n.textContent?.trim()||n.querySelector?.('img'));[...d.body.childNodes].forEach(n=>{if(n.nodeType===1&&br(n)){if(has(cur))out.push(cur);cur={title:n.textContent.trim()||'Untitled',nodes:[n]}}else cur.nodes.push(n)});if(has(cur))out.push(cur);return out}function title(c,i){return c.title||($('#bookTitle').value||`Chapter ${i+1}`)}function refresh(){if(!st.external){let d=new DOMParser().parseFromString('<body>'+st.html,'text/html');sanitize(d);st.doc=d;st.chapters=split(d,$('#chapterSplit').value)}st.current=Math.min(st.current,Math.max(0,st.chapters.length-1));render()}function render(){const toc=$('#bookToc');toc.innerHTML='';st.chapters.forEach((c,i)=>{let b=document.createElement('button');b.textContent=title(c,i);b.className=i===st.current?'active':'';b.onclick=()=>{st.current=i;render()};toc.appendChild(b)});$('#prevChapter').disabled=st.current<=0;$('#nextChapter').disabled=st.current>=st.chapters.length-1;$('#editChapter').disabled=!st.chapters.length;$('#buildEpub').disabled=!st.chapters.length||st.external;const p=$('#bookPage');p.innerHTML='';if(!st.chapters.length){p.innerHTML='<p class="muted">Open a DOCX or EPUB to begin.</p>';return}st.chapters[st.current].nodes.forEach(n=>{let c=n.cloneNode(true);if(c.nodeType===1){let imgs=c.tagName==='IMG'?[c]:[...c.querySelectorAll('img')];imgs.forEach(img=>{let im=st.images.get(img.getAttribute('src'));if(im)img.src=im.url})}p.appendChild(c)})}async function docx(file) {
-  if (!file) return;
+(() => {
+  'use strict';
 
-  try {
-    status("Opening DOCX…");
+  const $ = s => document.querySelector(s);
 
-    const arrayBuffer = await file.arrayBuffer();
+  const EXT = {
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/gif': 'gif',
+    'image/svg+xml': 'svg',
+    'image/webp': 'webp'
+  };
 
-    const options = {
-      styleMap: [
-        "p[style-name='Title'] => h1.book-title:fresh",
-        "p[style-name='Subtitle'] => h2.book-subtitle:fresh",
-        "p[style-name='Heading 1'] => h1:fresh",
-        "p[style-name='Heading 2'] => h2:fresh",
-        "p[style-name='Heading 3'] => h3:fresh"
-      ],
-      convertImage: mammoth.images.imgElement(function (image) {
-        return image.read("base64").then(function (imageBuffer) {
-          return {
-            src: "data:" + image.contentType + ";base64," + imageBuffer
-          };
-        });
-      })
+  let st = {
+    html: '',
+    doc: null,
+    chapters: [],
+    current: 0,
+    images: new Map(),
+    notes: [],
+    cover: null,
+    external: false
+  };
+
+  const esc = s => String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+  function status(message) {
+    const el = $('#epubStatus');
+    if (el) el.textContent = message;
+  }
+
+  function sanitize(doc) {
+    doc.querySelectorAll(
+      'script,style,iframe,object,embed,link,meta,form'
+    ).forEach(el => el.remove());
+
+    doc.querySelectorAll('*').forEach(el => {
+      [...el.attributes].forEach(attr => {
+        if (/^on/i.test(attr.name)) {
+          el.removeAttribute(attr.name);
+        }
+      });
+    });
+  }
+
+  function split(doc, mode) {
+    const chapters = [];
+    let current = {
+      title: null,
+      nodes: []
     };
 
-    const result = await mammoth.convertToHtml(
-      { arrayBuffer: arrayBuffer },
-      options
-    );
+    const isBreak = el => {
+      if (mode === 'h1') {
+        return el.tagName === 'H1';
+      }
 
-    st.html = result.value;st.notes = result.messages.map(x => x.message);
+      if (mode === 'h12') {
+        return ['H1', 'H2'].includes(el.tagName);
+      }
 
-    const parser = new DOMParser();
-    const parsed = parser.parseFromString(
-      "<div id='docx-root'>" + result.value + "</div>",
-      "text/html"
-    );
+      return false;
+    };
 
-    const root = parsed.getElementById("docx-root");
+    const hasContent = chapter =>
+      chapter.nodes.some(node =>
+        node.textContent?.trim() ||
+        node.querySelector?.('img')
+      );
 
-    if (!root) {
-      throw new Error("DOCX content could not be prepared.");
+    [...doc.body.childNodes].forEach(node => {
+      if (
+        node.nodeType === 1 &&
+        isBreak(node)
+      ) {
+        if (hasContent(current)) {
+          chapters.push(current);
+        }
+
+        current = {
+          title:
+            node.textContent.trim() ||
+            'Untitled',
+          nodes: [node]
+        };
+      } else {
+        current.nodes.push(node);
+      }
+    });
+
+    if (hasContent(current)) {
+      chapters.push(current);
     }
 
-    st.doc = root;
-
-    const titleField = document.getElementById("bookTitle");
-    if (titleField && !titleField.value.trim()) {
-      titleField.value = file.name.replace(/\.docx$/i, "");
-    }
-    st.current = 0;
-    notes();
-    refresh();
-
-    if (result.messages && result.messages.length) {
-      console.log("Mammoth messages:", result.messages);
-    }
-
-    status("DOCX opened successfully.");
-  } catch (error) {
-    console.error("DOCX import error:", error);
-    status("DOCX error: " + (error.message || String(error)));
+    return chapters;
   }
-}function notes(){let d=$('#conversionNotes'),l=$('#conversionList');l.innerHTML='';if(!st.notes.length){d.hidden=true;return}st.notes.forEach(x=>{let li=document.createElement('li');li.textContent=x;l.appendChild(li)});$('#conversionSummary').textContent=`${st.notes.length} conversion note${st.notes.length===1?'':'s'}`;d.hidden=false}function beginEdit(){$('#bookPage').contentEditable='true';$('#bookPage').focus();$('#editChapter').hidden=true;$('#saveChapter').hidden=false;$('#cancelEdit').hidden=false}function saveEdit(){let d=new DOMParser().parseFromString('<body>'+$('#bookPage').innerHTML,'text/html');sanitize(d);st.chapters[st.current].nodes=[...d.body.childNodes].map(n=>n.cloneNode(true));st.chapters[st.current].title=d.querySelector('h1,h2,h3')?.textContent.trim()||st.chapters[st.current].title;if(!st.external){st.html=st.chapters.flatMap(c=>c.nodes).map(n=>n.outerHTML||n.textContent).join('\n');st.doc=new DOMParser().parseFromString('<body>'+st.html,'text/html')}endEdit();render();status('Chapter edits saved.')}function endEdit(){$('#bookPage').contentEditable='false';$('#editChapter').hidden=false;$('#saveChapter').hidden=true;$('#cancelEdit').hidden=true}function css(){return `body{line-height:1.5}p{margin:0 0 .7em}img{max-width:100%;height:auto}h1,h2,h3{line-height:1.25}`};async function build(){try{status('Building EPUB…');let zip=new JSZip(),lang=$('#bookLang').value||'en',bt=$('#bookTitle').value||'Untitled',id='urn:uuid:'+(crypto.randomUUID?crypto.randomUUID():Date.now());zip.file('mimetype','application/epub+zip',{compression:'STORE'});zip.file('META-INF/container.xml','<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>');let z=zip.folder('OEBPS');z.file('styles.css',css());let manifest=['<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>','<item id="css" href="styles.css" media-type="text/css"/>'],spine=[],nav=[];st.chapters.forEach((c,i)=>{let fn=`chapter-${i+1}.xhtml`,body=c.nodes.map(n=>n.outerHTML||esc(n.textContent)).join('\n');z.file(fn,`<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" lang="${esc(lang)}"><head><title>${esc(title(c,i))}</title><link rel="stylesheet" href="styles.css"/></head><body>${body}</body></html>`);manifest.push(`<item id="c${i}" href="${fn}" media-type="application/xhtml+xml"/>`);spine.push(`<itemref idref="c${i}"/>`);nav.push(`<li><a href="${fn}">${esc(title(c,i))}</a></li>`)});for(const [path,im] of st.images){z.file(path,im.buf);manifest.push(`<item id="img${manifest.length}" href="${path}" media-type="${im.mime}"/>`)}z.file('nav.xhtml',`<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol>${nav.join('')}</ol></nav></body></html>`);z.file('content.opf',`<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">${id}</dc:identifier><dc:title>${esc(bt)}</dc:title><dc:creator>${esc($('#bookAuthor').value)}</dc:creator><dc:language>${esc(lang)}</dc:language><meta property="dcterms:modified">${new Date().toISOString().replace(/\.\d+Z$/,'Z')}</meta></metadata><manifest>${manifest.join('')}</manifest><spine>${spine.join('')}</spine></package>`);let blob=await zip.generateAsync({type:'blob',mimeType:'application/epub+zip'});window.saveBlob(blob,(bt.replace(/[^\w-]+/g,'-')||'book')+'.epub');status('EPUB saved.')}catch(e){console.error(e);status('Could not build the EPUB.')}}async function openEpub(file){if(!file)return;try{status('Opening EPUB…');let zip=await JSZip.loadAsync(await file.arrayBuffer()),cont=await zip.file('META-INF/container.xml').async('text'),path=cont.match(/full-path=["']([^"']+)/i)[1],base=path.includes('/')?path.slice(0,path.lastIndexOf('/')+1):'',opf=new DOMParser().parseFromString(await zip.file(path).async('text'),'application/xml'),map=new Map([...opf.querySelectorAll('manifest item')].map(x=>[x.getAttribute('id'),x.getAttribute('href')])),ids=[...opf.querySelectorAll('spine itemref')].map(x=>x.getAttribute('idref'));st.chapters=[];for(let id of ids){let href=map.get(id);if(!href)continue,f=zip.file(base+decodeURIComponent(href.split('#')[0]));if(!f)continue,d=new DOMParser().parseFromString(await f.async('text'),'text/html');sanitize(d);st.chapters.push({title:d.querySelector('h1,h2,h3')?.textContent.trim()||`Chapter ${st.chapters.length+1}`,nodes:[...d.body.childNodes]})}st.external=true;st.current=0;render();status(`Opened ${file.name}. Existing EPUBs can be read and edited in this build; Save as EPUB for opened EPUBs will be added next.`)}catch(e){console.error(e);status('Could not open that EPUB.')}}$('#docxFile').onchange=e=>docx(e.target.files[0]);$('#openEpub').onchange=e=>openEpub(e.target.files[0]);$('#chapterSplit').onchange=()=>{st.current=0;refresh()};$('#prevChapter').onclick=()=>{if(st.current>0){st.current--;render()}};$('#nextChapter').onclick=()=>{if(st.current<st.chapters.length-1){st.current++;render()}};$('#editChapter').onclick=beginEdit;$('#saveChapter').onclick=saveEdit;$('#cancelEdit').onclick=()=>{endEdit();render()};$('#buildEpub').onclick=build;$('#readerSize').oninput=e=>$('#bookPage').style.fontSize=(1.06*e.target.value/100)+'rem';$('#readerTheme').onclick=()=>document.querySelector('#epub').classList.toggle('reader-dark');})();
+
+  function chapterTitle(chapter, index) {
+    return (
+      chapter.title ||
+      $('#bookTitle')?.value ||
+      `Chapter ${index + 1}`
+    );
+  }
+
+  function refresh() {
+    if (!st.external) {
+      const doc =
+        new DOMParser().parseFromString(
+          '<!doctype html><html><body>' +
+          st.html +
+          '</body></html>',
+          'text/html'
+        );
+
+      sanitize(doc);
+
+      st.doc = doc;
+
+      const mode =
+        $('#chapterSplit')?.value ||
+        'h1';
+
+      st.chapters = split(doc, mode);
+    }
+
+    st.current = Math.min(
+      st.current,
+      Math.max(
+        0,
+        st.chapters.length - 1
+      )
+    );
+
+    render();
+  }
+
+  function render() {
+    const toc = $('#bookToc');
+    const page = $('#bookPage');
+
+    if (!toc || !page) return;
+
+    toc.innerHTML = '';
+
+    st.chapters.forEach(
+      (chapter, index) => {
+        const button =
+          document.createElement('button');
+
+        button.type = 'button';
+
+        button.textContent =
+          chapterTitle(
+            chapter,
+            index
+          );
+
+        button.className =
+          index === st.current
+            ? 'active'
+            : '';
+
+        button.onclick = () => {
+          endEdit();
+          st.current = index;
+          render();
+        };
+
+        toc.appendChild(button);
+      }
+    );
+
+    if ($('#prevChapter')) {
+      $('#prevChapter').disabled =
+        st.current <= 0;
+    }
+
+    if ($('#nextChapter')) {
+      $('#nextChapter').disabled =
+        st.current >=
+        st.chapters.length - 1;
+    }
+
+    if ($('#editChapter')) {
+      $('#editChapter').disabled =
+        !st.chapters.length;
+    }
+
+    if ($('#buildEpub')) {
+      $('#buildEpub').disabled =
+        !st.chapters.length ||
+        st.external;
+    }
+
+    page.innerHTML = '';
+
+    if (!st.chapters.length) {
+      page.innerHTML =
+        '<p class="muted">' +
+        'Open a DOCX or EPUB to begin.' +
+        '</p>';
+
+      return;
+    }
+
+    st.chapters[
+      st.current
+    ].nodes.forEach(node => {
+      const clone =
+        node.cloneNode(true);
+
+      if (clone.nodeType === 1) {
+        const images =
+          clone.tagName === 'IMG'
+            ? [clone]
+            : [
+                ...clone.querySelectorAll(
+                  'img'
+                )
+              ];
+
+        images.forEach(img => {
+          const image =
+            st.images.get(
+              img.getAttribute('src')
+            );
+
+          if (image) {
+            img.src = image.url;
+          }
+        });
+      }
+
+      page.appendChild(clone);
+    });
+  }
+
+  function showNotes() {
+    const box =
+      $('#conversionNotes');
+
+    const list =
+      $('#conversionList');
+
+    const summary =
+      $('#conversionSummary');
+
+    if (!box || !list) return;
+
+    list.innerHTML = '';
+
+    if (!st.notes.length) {
+      box.hidden = true;
+      return;
+    }
+
+    st.notes.forEach(note => {
+      const li =
+        document.createElement('li');
+
+      li.textContent = note;
+
+      list.appendChild(li);
+    });
+
+    if (summary) {
+      summary.textContent =
+        `${st.notes.length} ` +
+        `conversion note` +
+        `${st.notes.length === 1
+          ? ''
+          : 's'}`;
+    }
+
+    box.hidden = false;
+  }
+
+  async function openDocx(file) {
+    if (!file) return;
+
+    status(
+      'Reading Word document…'
+    );
+
+    st.external = false;
+
+    st.images.forEach(image => {
+      if (image.url) {
+        URL.revokeObjectURL(
+          image.url
+        );
+      }
+    });
+
+    st.images = new Map();
+    st.notes = [];
+    st.html = '';
+    st.chapters = [];
+    st.current = 0;
+
+    try {
+      if (
+        typeof mammoth ===
+        'undefined'
+      ) {
+        throw new Error(
+          'The DOCX reader library ' +
+          'did not load. Refresh the ' +
+          'page and try again.'
+        );
+      }
+
+      const arrayBuffer =
+        await file.arrayBuffer();
+
+      const result =
+        await mammoth.convertToHtml(
+          { arrayBuffer },
+          {
+            styleMap: [
+              "p[style-name='Title'] => h1.book-title:fresh",
+              "p[style-name='Subtitle'] => h2.book-subtitle:fresh",
+              "p[style-name='Heading 1'] => h1:fresh",
+              "p[style-name='Heading 2'] => h2:fresh",
+              "p[style-name='Heading 3'] => h3:fresh"
+            ],
+
+            convertImage:
+              mammoth.images.imgElement(
+                async image => {
+                  const ext =
+                    EXT[
+                      image.contentType
+                    ];
+
+                  if (!ext) {
+                    return {
+                      src: ''
+                    };
+                  }
+
+                  const buffer =
+                    await image
+                      .readAsArrayBuffer();
+
+                  const path =
+                    `images/img-` +
+                    `${st.images.size + 1}` +
+                    `.${ext}`;
+
+                  const blob =
+                    new Blob(
+                      [buffer],
+                      {
+                        type:
+                          image.contentType
+                      }
+                    );
+
+                  const url =
+                    URL.createObjectURL(
+                      blob
+                    );
+
+                  st.images.set(
+                    path,
+                    {
+                      buf: buffer,
+                      mime:
+                        image.contentType,
+                      url
+                    }
+                  );
+
+                  return {
+                    src: path
+                  };
+                }
+              )
+          }
+        );
+
+      st.html =
+        result.value || '';
+
+      st.notes =
+        (
+          result.messages || []
+        ).map(
+          message =>
+            message.message
+        );
+
+      const titleField =
+        $('#bookTitle');
+
+      if (titleField) {
+        titleField.value =
+          file.name.replace(
+            /\.docx$/i,
+            ''
+          );
+      }
+
+      showNotes();
+      refresh();
+
+      if (
+        !st.chapters.length
+      ) {
+        throw new Error(
+          'The DOCX was read, ' +
+          'but no document content ' +
+          'was found.'
+        );
+      }
+
+      status(
+        `Loaded ${file.name}.`
+      );
+    } catch (error) {
+      console.error(
+        'DOCX import error:',
+        error
+      );
+
+      status(
+        'DOCX error: ' +
+        (
+          error &&
+          error.message
+            ? error.message
+            : String(error)
+        )
+      );
+    }
+  }
+
+  function beginEdit() {
+    if (!st.chapters.length) {
+      return;
+    }
+
+    const page =
+      $('#bookPage');
+
+    page.contentEditable =
+      'true';
+
+    page.focus();
+
+    if ($('#editChapter')) {
+      $('#editChapter').hidden =
+        true;
+    }
+
+    if ($('#saveChapter')) {
+      $('#saveChapter').hidden =
+        false;
+    }
+
+    if ($('#cancelEdit')) {
+      $('#cancelEdit').hidden =
+        false;
+    }
+  }
+
+  function saveEdit() {
+    if (!st.chapters.length) {
+      return;
+    }
+
+    const page =
+      $('#bookPage');
+
+    const doc =
+      new DOMParser()
+        .parseFromString(
+          '<!doctype html>' +
+          '<html><body>' +
+          page.innerHTML +
+          '</body></html>',
+          'text/html'
+        );
+
+    sanitize(doc);
+
+    st.chapters[
+      st.current
+    ].nodes = [
+      ...doc.body.childNodes
+    ].map(
+      node =>
+        node.cloneNode(true)
+    );
+
+    st.chapters[
+      st.current
+    ].title =
+      doc.querySelector(
+        'h1,h2,h3'
+      )?.textContent.trim() ||
+      st.chapters[
+        st.current
+      ].title;
+
+    if (!st.external) {
+      st.html =
+        st.chapters
+          .flatMap(
+            chapter =>
+              chapter.nodes
+          )
+          .map(
+            node =>
+              node.outerHTML ||
+              esc(
+                node.textContent ||
+                ''
+              )
+          )
+          .join('\n');
+
+      st.doc =
+        new DOMParser()
+          .parseFromString(
+            '<!doctype html>' +
+            '<html><body>' +
+            st.html +
+            '</body></html>',
+            'text/html'
+          );
+    }
+
+    endEdit();
+    render();
+
+    status(
+      'Chapter edits saved.'
+    );
+  }
+
+  function endEdit() {
+    const page =
+      $('#bookPage');
+
+    if (page) {
+      page.contentEditable =
+        'false';
+    }
+
+    if ($('#editChapter')) {
+      $('#editChapter').hidden =
+        false;
+    }
+
+    if ($('#saveChapter')) {
+      $('#saveChapter').hidden =
+        true;
+    }
+
+    if ($('#cancelEdit')) {
+      $('#cancelEdit').hidden =
+        true;
+    }
+  }
+
+  function bookCss() {
+    return [
+      'body{line-height:1.5;}',
+      'p{margin:0 0 .7em;}',
+      'img{max-width:100%;height:auto;}',
+      'h1,h2,h3{line-height:1.25;}'
+    ].join('');
+  }
+
+  async function buildEpub() {
+    try {
+      if (
+        typeof JSZip ===
+        'undefined'
+      ) {
+        throw new Error(
+          'The EPUB packaging ' +
+          'library did not load.'
+        );
+      }
+
+      if (!st.chapters.length) {
+        throw new Error(
+          'No book is loaded.'
+        );
+      }
+
+      status(
+        'Building EPUB…'
+      );
+
+      const zip =
+        new JSZip();
+
+      const lang =
+        $('#bookLang')?.value ||
+        'en';
+
+      const bookTitle =
+        $('#bookTitle')?.value ||
+        'Untitled';
+
+      const author =
+        $('#bookAuthor')?.value ||
+        '';
+
+      const id =
+        'urn:uuid:' +
+        (
+          crypto.randomUUID
+            ? crypto.randomUUID()
+            : Date.now()
+        );
+
+      zip.file(
+        'mimetype',
+        'application/epub+zip',
+        {
+          compression: 'STORE'
+        }
+      );
+
+      zip.file(
+        'META-INF/container.xml',
+        '<?xml version="1.0"?>' +
+        '<container version="1.0" ' +
+        'xmlns="urn:oasis:names:' +
+        'tc:opendocument:xmlns:' +
+        'container">' +
+        '<rootfiles>' +
+        '<rootfile ' +
+        'full-path="OEBPS/content.opf" ' +
+        'media-type="' +
+        'application/oebps-package+xml"/>' +
+        '</rootfiles>' +
+        '</container>'
+      );
+
+      const folder =
+        zip.folder('OEBPS');
+
+      folder.file(
+        'styles.css',
+        bookCss()
+      );
+
+      const manifest = [
+        '<item id="nav" ' +
+        'href="nav.xhtml" ' +
+        'media-type="' +
+        'application/xhtml+xml" ' +
+        'properties="nav"/>',
+
+        '<item id="css" ' +
+        'href="styles.css" ' +
+        'media-type="text/css"/>'
+      ];
+
+      const spine = [];
+      const nav = [];
+
+      st.chapters.forEach(
+        (chapter, index) => {
+          const filename =
+            `chapter-${index + 1}.xhtml`;
+
+          const body =
+            chapter.nodes
+              .map(
+                node =>
+                  node.outerHTML ||
+                  esc(
+                    node.textContent ||
+                    ''
+                  )
+              )
+              .join('\n');
+
+          folder.file(
+            filename,
+            '<?xml version="1.0" ' +
+            'encoding="utf-8"?>' +
+            '<html ' +
+            'xmlns="' +
+            'http://www.w3.org/' +
+            '1999/xhtml" ' +
+            `lang="${esc(lang)}">` +
+            '<head>' +
+            `<title>${
+              esc(
+                chapterTitle(
+                  chapter,
+                  index
+                )
+              )
+            }</title>` +
+            '<link rel="stylesheet" ' +
+            'href="styles.css"/>' +
+            '</head>' +
+            `<body>${body}</body>` +
+            '</html>'
+          );
+
+          manifest.push(
+            `<item id="c${index}" ` +
+            `href="${filename}" ` +
+            'media-type="' +
+            'application/xhtml+xml"/>'
+          );
+
+          spine.push(
+            `<itemref ` +
+            `idref="c${index}"/>`
+          );
+
+          nav.push(
+            `<li><a ` +
+            `href="${filename}">` +
+            `${
+              esc(
+                chapterTitle(
+                  chapter,
+                  index
+                )
+              )
+            }` +
+            '</a></li>'
+          );
+        }
+      );
+
+      let imageIndex = 0;
+
+      for (
+        const [path, image]
+        of st.images
+      ) {
+        imageIndex++;
+
+        folder.file(
+          path,
+          image.buf
+        );
+
+        manifest.push(
+          `<item ` +
+          `id="img${imageIndex}" ` +
+          `href="${path}" ` +
+          `media-type="${
+            image.mime
+          }"/>`
+        );
+      }
+
+      folder.file(
+        'nav.xhtml',
+        '<?xml version="1.0"?>' +
+        '<html ' +
+        'xmlns="' +
+        'http://www.w3.org/' +
+        '1999/xhtml" ' +
+        'xmlns:epub="' +
+        'http://www.idpf.org/' +
+        '2007/ops">' +
+        '<head>' +
+        '<title>Contents</title>' +
+        '</head>' +
+        '<body>' +
+        '<nav epub:type="toc">' +
+        `<ol>${nav.join('')}</ol>` +
+        '</nav>' +
+        '</body>' +
+        '</html>'
+      );
+
+      folder.file(
+        'content.opf',
+        '<?xml version="1.0"?>' +
+        '<package ' +
+        'xmlns="' +
+        'http://www.idpf.org/' +
+        '2007/opf" ' +
+        'version="3.0" ' +
+        'unique-identifier="id">' +
+        '<metadata ' +
+        'xmlns:dc="' +
+        'http://purl.org/dc/' +
+        'elements/1.1/">' +
+        `<dc:identifier id="id">` +
+        `${esc(id)}` +
+        '</dc:identifier>' +
+        `<dc:title>` +
+        `${esc(bookTitle)}` +
+        '</dc:title>' +
+        `<dc:creator>` +
+        `${esc(author)}` +
+        '</dc:creator>' +
+        `<dc:language>` +
+        `${esc(lang)}` +
+        '</dc:language>' +
+        '<meta ' +
+        'property="dcterms:modified">' +
+        `${
+          new Date()
+            .toISOString()
+            .replace(
+              /\.\d+Z$/,
+              'Z'
+            )
+        }` +
+        '</meta>' +
+        '</metadata>' +
+        `<manifest>` +
+        `${manifest.join('')}` +
+        '</manifest>' +
+        `<spine>` +
+        `${spine.join('')}` +
+        '</spine>' +
+        '</package>'
+      );
+
+      const blob =
+        await zip.generateAsync({
+          type: 'blob',
+          mimeType:
+            'application/epub+zip'
+        });
+
+      const filename =
+        (
+          bookTitle
+            .replace(
+              /[^\w-]+/g,
+              '-'
+            )
+            .replace(
+              /^-+|-+$/g,
+              ''
+            ) ||
+          'book'
+        ) +
+        '.epub';
+
+      if (
+        typeof window.saveBlob !==
+        'function'
+      ) {
+        throw new Error(
+          'The browser download ' +
+          'helper is unavailable.'
+        );
+      }
+
+      window.saveBlob(
+        blob,
+        filename
+      );
+
+      status(
+        'EPUB saved.'
+      );
+    } catch (error) {
+      console.error(
+        'EPUB build error:',
+        error
+      );
+
+      status(
+        'EPUB error: ' +
+        (
+          error &&
+          error.message
+            ? error.message
+            : String(error)
+        )
+      );
+    }
+  }
+
+  async function openEpub(file) {
+    if (!file) return;
+
+    try {
+      if (
+        typeof JSZip ===
+        'undefined'
+      ) {
+        throw new Error(
+          'The EPUB reader ' +
+          'library did not load.'
+        );
+      }
+
+      status(
+        'Opening EPUB…'
+      );
+
+      const zip =
+        await JSZip.loadAsync(
+          await file.arrayBuffer()
+        );
+
+      const containerFile =
+        zip.file(
+          'META-INF/container.xml'
+        );
+
+      if (!containerFile) {
+        throw new Error(
+          'This EPUB has no ' +
+          'container file.'
+        );
+      }
+
+      const containerText =
+        await containerFile
+          .async('text');
+
+      const match =
+        containerText.match(
+          /full-path=["']([^"']+)/i
+        );
+
+      if (!match) {
+        throw new Error(
+          'The EPUB package path ' +
+          'could not be found.'
+        );
+      }
+
+      const packagePath =
+        match[1];
+
+      const base =
+        packagePath.includes('/')
+          ? packagePath.slice(
+              0,
+              packagePath
+                .lastIndexOf('/') +
+                1
+            )
+          : '';
+
+      const packageFile =
+        zip.file(packagePath);
+
+      if (!packageFile) {
+        throw new Error(
+          'The EPUB package ' +
+          'document could not ' +
+          'be found.'
+        );
+      }
+
+      const packageDoc =
+        new DOMParser()
+          .parseFromString(
+            await packageFile
+              .async('text'),
+            'application/xml'
+          );
+
+      const manifest =
+        new Map(
+          [
+            ...packageDoc
+              .querySelectorAll(
+                'manifest item'
+              )
+          ].map(item => [
+            item.getAttribute('id'),
+            item.getAttribute('href')
+          ])
+        );
+
+      const spineIds =
+        [
+          ...packageDoc
+            .querySelectorAll(
+              'spine itemref'
+            )
+        ].map(
+          item =>
+            item.getAttribute(
+              'idref'
+            )
+        );
+
+      st.chapters = [];
+      st.images = new Map();
+
+      for (
+        const id of spineIds
+      ) {
+        const href =
+          manifest.get(id);
+
+        if (!href) continue;
+
+        const cleanHref =
+          decodeURIComponent(
+            href.split('#')[0]
+          );
+
+        const chapterFile =
+          zip.file(
+            base + cleanHref
+          );
+
+        if (!chapterFile) {
+          continue;
+        }
+
+        const doc =
+          new DOMParser()
+            .parseFromString(
+              await chapterFile
+                .async('text'),
+              'text/html'
+            );
+
+        sanitize(doc);
+
+        st.chapters.push({
+          title:
+            doc.querySelector(
+              'h1,h2,h3'
+            )?.textContent.trim() ||
+            `Chapter ${
+              st.chapters.length + 1
+            }`,
+
+          nodes:
+            [
+              ...doc.body.childNodes
+            ].map(
+              node =>
+                node.cloneNode(true)
+            )
+        });
+      }
+
+      if (!st.chapters.length) {
+        throw new Error(
+          'No readable chapters ' +
+          'were found in this EPUB.'
+        );
+      }
+
+      st.external = true;
+      st.current = 0;
+
+      render();
+
+      status(
+        `Opened ${file.name}. ` +
+        'Existing EPUBs can be ' +
+        'read and edited; exporting ' +
+        'opened EPUBs will be added next.'
+      );
+    } catch (error) {
+      console.error(
+        'EPUB open error:',
+        error
+      );
+
+      status(
+        'EPUB error: ' +
+        (
+          error &&
+          error.message
+            ? error.message
+            : String(error)
+        )
+      );
+    }
+  }
+
+  const docxInput =
+    $('#docxFile');
+
+  const epubInput =
+    $('#openEpub');
+
+  const splitSelect =
+    $('#chapterSplit');
+
+  const prev =
+    $('#prevChapter');
+
+  const next =
+    $('#nextChapter');
+
+  const edit =
+    $('#editChapter');
+
+  const save =
+    $('#saveChapter');
+
+  const cancel =
+    $('#cancelEdit');
+
+  const buildButton =
+    $('#buildEpub');
+
+  const size =
+    $('#readerSize');
+
+  const theme =
+    $('#readerTheme');
+
+  if (docxInput) {
+    docxInput.onchange =
+      event =>
+        openDocx(
+          event.target.files[0]
+        );
+  }
+
+  if (epubInput) {
+    epubInput.onchange =
+      event =>
+        openEpub(
+          event.target.files[0]
+        );
+  }
+
+  if (splitSelect) {
+    splitSelect.onchange =
+      () => {
+        st.current = 0;
+        refresh();
+      };
+  }
+
+  if (prev) {
+    prev.onclick = () => {
+      if (st.current > 0) {
+        endEdit();
+        st.current--;
+        render();
+      }
+    };
+  }
+
+  if (next) {
+    next.onclick = () => {
+      if (
+        st.current <
+        st.chapters.length - 1
+      ) {
+        endEdit();
+        st.current++;
+        render();
+      }
+    };
+  }
+
+  if (edit) {
+    edit.onclick =
+      beginEdit;
+  }
+
+  if (save) {
+    save.onclick =
+      saveEdit;
+  }
+
+  if (cancel) {
+    cancel.onclick = () => {
+      endEdit();
+      render();
+    };
+  }
+
+  if (buildButton) {
+    buildButton.onclick =
+      buildEpub;
+  }
+
+  if (size) {
+    size.oninput = event => {
+      const page =
+        $('#bookPage');
+
+      if (page) {
+        page.style.fontSize =
+          (
+            1.06 *
+            Number(
+              event.target.value
+            ) /
+            100
+          ) +
+          'rem';
+      }
+    };
+  }
+
+  if (theme) {
+    theme.onclick = () => {
+      document
+        .querySelector('#epub')
+        ?.classList.toggle(
+          'reader-dark'
+        );
+    };
+  }
+
+  render();
+})();
