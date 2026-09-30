@@ -904,61 +904,40 @@ async function saveDocx() {
    EVENTS
 --------------------------------------------------------- */
 
-$('#pdfFile').onchange =
-  event => {
-    loadPdf(
-      event.target.files[0]
-    );
-  };
+// Connect a function only when that button exists in the current interface.
+function connect(id, eventName, handler) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.addEventListener(eventName, handler);
+  }
+}
 
+// Open PDF
+connect("pdfFile", "change", event => {
+  loadPdf(event.target.files[0]);
+});
 
-$('#zoomIn').onclick =
-  async () => {
-    if (!pdfDocument) return;
+// Zoom controls
+connect("zoomIn", "click", async () => {
+  if (!pdfDocument) return;
+  scale = Math.min(2.5, scale + 0.15);
+  await renderPdf();
+});
 
-    scale =
-      Math.min(
-        2.5,
-        scale + 0.15
-      );
+connect("zoomOut", "click", async () => {
+  if (!pdfDocument) return;
+  scale = Math.max(0.5, scale - 0.15);
+  await renderPdf();
+});
 
-    await renderPdf();
-  };
+// Switch between the original PDF and editable document
+connect("editPdfDocument", "click", enterEditMode);
+connect("goToPdfEditor", "click", enterEditMode);
+connect("viewOriginalPdf", "click", viewOriginal);
 
+// Save the original PDF
+connect("savePdf", "click", saveOriginalPdf);
 
-$('#zoomOut').onclick =
-  async () => {
-    if (!pdfDocument) return;
-
-    scale =
-      Math.max(
-        0.5,
-        scale - 0.15
-      );
-
-    await renderPdf();
-  };
-
-
-$('#editPdfDocument').onclick =
-  enterEditMode;
-
-
-$('#goToPdfEditor').onclick =
-  enterEditMode;
-
-
-$('#viewOriginalPdf').onclick =
-  viewOriginal;
-
-
-$('#savePdf').onclick =
-  saveOriginalPdf;
-
-
-$('#savePdfDocx').onclick =
-  saveDocx;
-
-
-$('#saveEditorDocx').onclick =
-  saveDocx;
+// Save editable document as DOCX
+connect("savePdfDocx", "click", saveDocx);
+connect("saveEditorDocx", "click", saveDocx);
