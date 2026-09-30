@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EC Doc Studio</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<header>
+ <div class="brand"><div class="mark">❧</div><div><h1>EC Doc Studio</h1><div class="tag">Convert • Edit • Read • Prepare</div></div></div>
+ <div class="badge">Elemental Cre8tions • Development build</div>
+</header>
+<main>
+<section class="hero">
+ <div><h2>One calm workspace for documents and books.</h2><p>Prepare EPUB content, preview books, organize PDF workflows, convert documents, and grow toward print and hardbound preparation.</p></div>
+ <div class="hero-note"><strong>Built to grow.</strong><p class="small">Advanced PDF, DOCX and EPUB conversions are separated into development modules for later server/library integration.</p></div>
+</section>
+<div class="tabs">
+ <button class="tab active" data-tab="home">Studio</button><button class="tab" data-tab="epub">EPUB Workspace</button>
+ <button class="tab" data-tab="pdf">PDF Tools</button><button class="tab" data-tab="convert">Convert</button>
+ <button class="tab" data-tab="print">Print / Hardbound</button>
+</div>
+<section class="workspace">
+<div id="home" class="pane active"><div class="grid">
+ <div class="card"><div class="icon">📖</div><h3>EPUB Workspace</h3><p>Import HTML/TXT, edit content, build a side TOC and preview the reading experience.</p><button class="btn secondary jump" data-go="epub">Open workspace</button></div>
+ <div class="card"><div class="icon">📄</div><h3>PDF Workshop</h3><p>Development area for page organization, merge/split, annotations and conversion.</p><button class="btn secondary jump" data-go="pdf">See PDF tools</button></div>
+ <div class="card"><div class="icon">⇄</div><h3>Converter</h3><p>Conversion center for DOCX, EPUB, PDF, HTML and TXT.</p><button class="btn secondary jump" data-go="convert">Open converter</button></div>
+</div></div>
+<div id="epub" class="pane">
+ <h2>EPUB / Reader Workspace</h2>
+ <div class="drop" id="drop"><div class="icon">📚</div><h3>Bring in book content</h3><p>Open HTML or TXT, or paste content below.</p>
+ <label class="btn" for="bookFile">Choose file</label><input id="bookFile" type="file" accept=".html,.htm,.txt,text/html,text/plain"><div id="bookInfo" class="fileinfo">No file selected.</div></div>
+ <div class="toolbar"><button class="btn" id="previewBtn">Build reader preview</button><button class="btn secondary" id="downloadHtml">Save edited HTML</button><button class="btn secondary" id="clearBtn">Clear</button></div>
+ <textarea id="editor" placeholder="Paste book HTML or plain text here. Use H1, H2, or H3 headings to create the side table of contents."></textarea>
+ <h3>Reader preview</h3><div class="two"><nav class="toc" id="toc"><span class="small">Headings will appear here.</span></nav><article class="reader" id="reader"><p class="small">Your preview will appear here.</p></article></div>
+</div>
+<div id="pdf" class="pane"><h2>PDF Workshop</h2><div class="grid">
+ <div class="card"><div class="icon">🧩</div><h3>Merge & Split</h3><p>Combine PDFs or extract selected pages.</p><div class="status">PDF engine integration planned.</div></div>
+ <div class="card"><div class="icon">↻</div><h3>Organize Pages</h3><p>Rotate, reorder and remove pages.</p><div class="status">PDF engine integration planned.</div></div>
+ <div class="card"><div class="icon">✎</div><h3>Edit & Annotate</h3><p>Add text, marks and notes.</p><div class="status">Production feature planned.</div></div>
+</div></div>
+<div id="convert" class="pane"><h2>Document Converter</h2><div class="grid">
+ <div class="card"><h3>DOCX → EPUB</h3><p>Planned manuscript conversion with heading recognition, navigation and EPUB packaging.</p><div class="status">Conversion engine required.</div></div>
+ <div class="card"><h3>PDF → DOCX</h3><p>Recover editable document content from PDFs.</p><div class="status">Server-side conversion recommended.</div></div>
+ <div class="card"><h3>DOCX → PDF</h3><p>Create fixed-layout PDFs from documents.</p><div class="status">Server-side rendering required.</div></div>
+ <div class="card"><h3>HTML → TXT</h3><p>Browser-native lightweight conversion.</p><button class="btn secondary" id="htmlToText">Convert editor content</button></div>
+ <div class="card"><h3>EPUB → PDF</h3><p>Future printable reading/proof copies.</p><div class="status">Planned.</div></div>
+ <div class="card"><h3>More Formats</h3><p>Future RTF, Markdown and image-extraction support.</p></div>
+</div></div>
+<div id="print" class="pane"><h2>Print & Hardbound Preparation</h2><div class="card"><div class="icon">📕</div><h3>Future book-production workspace</h3><p>Reserved for trim size, mirrored/gutter margins, bleed, chapter starts, headers/footers, page numbering, front matter, spine calculations and print-ready PDF export.</p><div class="status">Future development module.</div></div></div>
+</section></main>
+<footer>EC Doc Studio • by Elemental Cre8tions</footer>
+<script src="js/app.js"></script><script src="js/epub.js"></script><script src="js/pdf.js"></script><script src="js/converter.js"></script>
+</body></html>
