@@ -19,7 +19,10 @@
     images: new Map(),
     notes: [],
     cover: null,
-    external: false
+    external: false,
+    archive: null,
+    packagePath: null,
+    resources: new Map()
   };
 
   const esc = s => String(s)
@@ -69,7 +72,7 @@
     const hasContent = chapter =>
       chapter.nodes.some(node =>
         node.textContent?.trim() ||
-        node.querySelector?.('img')
+        node.matches?.('img,svg') || node.querySelector?.('img,svg')
       );
 
     [...doc.body.childNodes].forEach(node => {
@@ -193,8 +196,7 @@
 
     if ($('#buildEpub')) {
       $('#buildEpub').disabled =
-        !st.chapters.length ||
-        st.external;
+        !st.chapters.length;
     }
 
     page.innerHTML = '';
@@ -214,7 +216,7 @@
       const clone =
         node.cloneNode(true);
 
-      if (clone.nodeType === 1) {
+      if (clone.nodeType === 1 && !st.external) {
         const images =
           clone.tagName === 'IMG'
             ? [clone]
@@ -236,6 +238,7 @@
         });
       }
 
+      if (st.external && clone.nodeType === 1) previewImagePaths(clone, st.chapters[st.current]);
       page.appendChild(clone);
     });
   }
@@ -282,6 +285,11 @@
 
   async function openDocx(file) {
     if (!file) return;
+
+    releaseResources();
+    st.archive = null;
+    st.packagePath = null;
+    endEdit();
 
     status(
       'Reading Word document…'
@@ -339,9 +347,7 @@
                     ];
 
                   if (!ext) {
-                    return {
-                      src: ''
-                    };
+                    throw new Error('This manuscript contains an unsupported picture type: ' + image.contentType + '. Convert that picture to PNG or JPEG and reopen the manuscript.');
                   }
 
                   const buffer =
@@ -489,6 +495,8 @@
         );
 
     sanitize(doc);
+    // Preview URLs are session-only. Store portable paths in the book model.
+    restoreImagePaths(doc, st.chapters[st.current]);
 
     st.chapters[
       st.current
@@ -498,6 +506,7 @@
       node =>
         node.cloneNode(true)
     );
+    st.chapters[st.current].edited = true;
 
     st.chapters[
       st.current
@@ -581,6 +590,11 @@
 
   async function buildEpub() {
     try {
+      if ($('#bookPage').isContentEditable) saveEdit();
+      if (st.external) {
+        await saveOpenedEpub();
+        return;
+      }
       if (
         typeof JSZip ===
         'undefined'
@@ -680,11 +694,7 @@
             chapter.nodes
               .map(
                 node =>
-                  node.outerHTML ||
-                  esc(
-                    node.textContent ||
-                    ''
-                  )
+                  new XMLSerializer().serializeToString(node)
               )
               .join('\n');
 
@@ -923,203 +933,196 @@
     }
   }
 
+  function releaseResources() {
+    st.resources.forEach(resource => URL.revokeObjectURL(resource.url));
+    st.resources = new Map();
+  }
+
+  function archivePath(base, href) {
+    if (!href || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(href)) return null;
+    const url = new URL(href, 'https://epub.invalid/' + base);
+    return decodeURIComponent(url.pathname.slice(1));
+  }
+
+  function imageAttributes(root, transform) {
+    const elements = [root, ...root.querySelectorAll('*')];
+    for (const el of elements) {
+      if (el.nodeType !== 1) continue;
+      const name = el.localName?.toLowerCase();
+      const attrs = name === 'img' ? ['src'] : name === 'image' ? ['href', 'xlink:href'] : [];
+      for (const attr of attrs) {
+        if (el.hasAttribute(attr)) el.setAttribute(attr, transform(el.getAttribute(attr)));
+      }
+      // Keep responsive image candidates portable as well as ordinary images.
+      if ((name === 'img' || name === 'source') && el.hasAttribute('srcset')) {
+        el.setAttribute('srcset', el.getAttribute('srcset').replace(/(^|,\s*)([^\s,]+)([^,]*)/g,
+          (_, prefix, url, descriptor) => prefix + transform(url) + descriptor));
+      }
+      if (el.hasAttribute('style')) {
+        el.setAttribute('style', el.getAttribute('style').replace(/url\(\s*(['"]?)(.*?)\1\s*\)/g,
+          (_, quote, url) => 'url("' + transform(url) + '")'));
+      }
+    }
+  }
+
+  function previewImagePaths(root, chapter) {
+    imageAttributes(root, href => {
+      const path = archivePath(chapter.path, href);
+      return st.resources.get(path)?.url || href;
+    });
+  }
+
+  function restoreImagePaths(root, chapter) {
+    const paths = new Map();
+    if (st.external) {
+      for (const [path, resource] of st.resources) {
+        const from = chapter.path.split('/').slice(0, -1);
+        const to = path.split('/');
+        while (from.length && to.length && from[0] === to[0]) { from.shift(); to.shift(); }
+        paths.set(resource.url, '../'.repeat(from.length) + to.map(encodeURIComponent).join('/'));
+      }
+    } else {
+      for (const [path, image] of st.images) paths.set(image.url, path);
+    }
+    imageAttributes(root, href => paths.get(href) || href);
+  }
+
+  function parseXml(text, label) {
+    const doc = new DOMParser().parseFromString(text, 'application/xml');
+    if (doc.querySelector('parsererror')) throw new Error(label + ' contains invalid XML.');
+    return doc;
+  }
+
+  async function saveOpenedEpub() {
+    status('Saving EPUB with its original pictures…');
+    // Clone the original archive so retries and later edits always start from it.
+    const zip = await JSZip.loadAsync(st.archive);
+    for (const chapter of st.chapters) {
+      if (!chapter.edited) continue;
+      const doc = parseXml(chapter.source, chapter.path);
+      const body = doc.getElementsByTagNameNS('*', 'body')[0];
+      if (!body) throw new Error('No body found in ' + chapter.path);
+      const content = document.createElement('div');
+      chapter.nodes.forEach(node => content.appendChild(node.cloneNode(true)));
+      restoreImagePaths(content, chapter);
+      body.replaceChildren(...[...content.childNodes].map(node => doc.importNode(node, true)));
+      const xml = new XMLSerializer().serializeToString(doc);
+      parseXml(xml, chapter.path);
+      if (/blob:https?:/i.test(xml)) throw new Error('A temporary image link could not be saved. Reopen the book and try again.');
+      zip.file(chapter.path, xml);
+    }
+    const packageDoc = parseXml(await zip.file(st.packagePath).async('text'), 'Book metadata');
+    for (const [name, field] of [['title', '#bookTitle'], ['creator', '#bookAuthor'], ['language', '#bookLang']]) {
+      const el = packageDoc.getElementsByTagNameNS('http://purl.org/dc/elements/1.1/', name)[0];
+      if (el) el.textContent = $(field).value;
+    }
+    zip.file(st.packagePath, new XMLSerializer().serializeToString(packageDoc));
+    // EPUB requires the uncompressed mimetype entry to come first.
+    const output = new JSZip();
+    output.file('mimetype', 'application/epub+zip', {compression:'STORE'});
+    for (const entry of Object.values(zip.files)) {
+      if (entry.name !== 'mimetype' && !entry.dir) output.file(entry.name, await entry.async('uint8array'));
+    }
+    const blob = await output.generateAsync({type:'blob', mimeType:'application/epub+zip'});
+    window.saveBlob(blob, ($('#bookTitle').value.replace(/[^\w-]+/g, '-') || 'book') + '.epub');
+    status('EPUB saved with its pictures.');
+  }
+
   async function openEpub(file) {
     if (!file) return;
-
+    const resources = new Map();
     try {
-      if (
-        typeof JSZip ===
-        'undefined'
-      ) {
-        throw new Error(
-          'The EPUB reader ' +
-          'library did not load.'
-        );
+      status('Opening EPUB and loading pictures…');
+      const archive = await file.arrayBuffer();
+      const zip = await JSZip.loadAsync(archive);
+      const containerFile = zip.file('META-INF/container.xml');
+      if (!containerFile) throw new Error('This EPUB has no container file.');
+      const container = parseXml(await containerFile.async('text'), 'EPUB container');
+      const packagePath = container.querySelector('rootfile')?.getAttribute('full-path');
+      const packageFile = packagePath && zip.file(packagePath);
+      if (!packageFile) throw new Error('The EPUB package could not be found.');
+      const packageDoc = parseXml(await packageFile.async('text'), 'EPUB package');
+      const manifest = new Map([...packageDoc.querySelectorAll('manifest item')].map(item => [item.getAttribute('id'), item]));
+      const notes = [];
+      async function loadImage(path, mime) {
+        if (resources.has(path)) return;
+        const entry = zip.file(path);
+        if (!entry) throw new Error('A picture is missing from this EPUB: ' + path);
+        const bytes = await entry.async('uint8array');
+        resources.set(path, {bytes, mime, url:URL.createObjectURL(new Blob([bytes], {type:mime}))});
       }
-
-      status(
-        'Opening EPUB…'
-      );
-
-      const zip =
-        await JSZip.loadAsync(
-          await file.arrayBuffer()
-        );
-
-      const containerFile =
-        zip.file(
-          'META-INF/container.xml'
-        );
-
-      if (!containerFile) {
-        throw new Error(
-          'This EPUB has no ' +
-          'container file.'
-        );
+      for (const item of manifest.values()) {
+        const mime = item.getAttribute('media-type') || '';
+        if (!mime.startsWith('image/')) continue;
+        const path = archivePath(packagePath, item.getAttribute('href'));
+        if (!path) { notes.push('A linked picture is outside this EPUB and may need an internet connection.'); continue; }
+        await loadImage(path, mime);
       }
-
-      const containerText =
-        await containerFile
-          .async('text');
-
-      const match =
-        containerText.match(
-          /full-path=["']([^"']+)/i
-        );
-
-      if (!match) {
-        throw new Error(
-          'The EPUB package path ' +
-          'could not be found.'
-        );
-      }
-
-      const packagePath =
-        match[1];
-
-      const base =
-        packagePath.includes('/')
-          ? packagePath.slice(
-              0,
-              packagePath
-                .lastIndexOf('/') +
-                1
-            )
-          : '';
-
-      const packageFile =
-        zip.file(packagePath);
-
-      if (!packageFile) {
-        throw new Error(
-          'The EPUB package ' +
-          'document could not ' +
-          'be found.'
-        );
-      }
-
-      const packageDoc =
-        new DOMParser()
-          .parseFromString(
-            await packageFile
-              .async('text'),
-            'application/xml'
-          );
-
-      const manifest =
-        new Map(
-          [
-            ...packageDoc
-              .querySelectorAll(
-                'manifest item'
-              )
-          ].map(item => [
-            item.getAttribute('id'),
-            item.getAttribute('href')
-          ])
-        );
-
-      const spineIds =
-        [
-          ...packageDoc
-            .querySelectorAll(
-              'spine itemref'
-            )
-        ].map(
-          item =>
-            item.getAttribute(
-              'idref'
-            )
-        );
-
-      st.chapters = [];
-      st.images = new Map();
-
-      for (
-        const id of spineIds
-      ) {
-        const href =
-          manifest.get(id);
-
-        if (!href) continue;
-
-        const cleanHref =
-          decodeURIComponent(
-            href.split('#')[0]
-          );
-
-        const chapterFile =
-          zip.file(
-            base + cleanHref
-          );
-
-        if (!chapterFile) {
-          continue;
-        }
-
-        const doc =
-          new DOMParser()
-            .parseFromString(
-              await chapterFile
-                .async('text'),
-              'text/html'
-            );
-
+      const chapters = [];
+      for (const ref of packageDoc.querySelectorAll('spine itemref')) {
+        const item = manifest.get(ref.getAttribute('idref'));
+        const path = item && archivePath(packagePath, item.getAttribute('href'));
+        const entry = path && zip.file(path);
+        if (!entry) throw new Error('A chapter is missing from this EPUB.');
+        const source = await entry.async('text');
+        const doc = parseXml(source, path);
+        const body = doc.getElementsByTagNameNS('*', 'body')[0];
+        if (!body) throw new Error('A chapter has no readable body: ' + path);
         sanitize(doc);
-
-        st.chapters.push({
-          title:
-            doc.querySelector(
-              'h1,h2,h3'
-            )?.textContent.trim() ||
-            `Chapter ${
-              st.chapters.length + 1
-            }`,
-
-          nodes:
-            [
-              ...doc.body.childNodes
-            ].map(
-              node =>
-                node.cloneNode(true)
-            )
+        const references = [];
+        imageAttributes(body, href => { references.push(href); return href; });
+        for (const href of references) {
+          if (href.startsWith('#')) continue;
+          const imagePath = archivePath(path, href);
+          if (!imagePath) continue;
+          const extension = imagePath.split('.').pop().toLowerCase();
+          const mime = Object.keys(EXT).find(type => EXT[type] === extension) || (extension === 'jpeg' ? 'image/jpeg' : 'application/octet-stream');
+          await loadImage(imagePath, mime);
+        }
+        chapters.push({path, source, edited:false,
+          title:doc.querySelector('h1,h2,h3')?.textContent.trim() || 'Chapter ' + (chapters.length + 1),
+          nodes:[...body.childNodes].map(node => document.importNode(node, true))});
+      }
+      if (!chapters.length) throw new Error('No readable chapters were found.');
+      // SVG cover files often wrap a raster image. Resolve their internal links
+      // for the preview while leaving the original bytes in the saved archive.
+      for (const [path, resource] of resources) {
+        if (resource.mime !== 'image/svg+xml') continue;
+        const svg = parseXml(new TextDecoder().decode(resource.bytes), path);
+        sanitize(svg);
+        imageAttributes(svg, href => {
+          const nested = resources.get(archivePath(path, href));
+          if (!nested) return href;
+          let binary = '';
+          for (let offset = 0; offset < nested.bytes.length; offset += 8192) {
+            binary += String.fromCharCode(...nested.bytes.subarray(offset, offset + 8192));
+          }
+          return 'data:' + nested.mime + ';base64,' + btoa(binary);
         });
+        URL.revokeObjectURL(resource.url);
+        resource.url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(svg)], {type:resource.mime}));
       }
-
-      if (!st.chapters.length) {
-        throw new Error(
-          'No readable chapters ' +
-          'were found in this EPUB.'
-        );
-      }
-
+      releaseResources();
+      st.images.forEach(image => URL.revokeObjectURL(image.url));
+      st.images = new Map();
+      st.resources = resources;
+      st.archive = archive;
+      st.packagePath = packagePath;
+      st.chapters = chapters;
+      st.notes = notes;
       st.external = true;
       st.current = 0;
-
+      for (const [name, field, fallback] of [['title','#bookTitle',file.name.replace(/\.epub$/i,'')], ['creator','#bookAuthor',''], ['language','#bookLang','en']]) {
+        $(field).value = packageDoc.getElementsByTagNameNS('http://purl.org/dc/elements/1.1/', name)[0]?.textContent || fallback;
+      }
+      endEdit();
       render();
-
-      status(
-        `Opened ${file.name}. ` +
-        'Existing EPUBs can be ' +
-        'read and edited; exporting ' +
-        'opened EPUBs will be added next.'
-      );
+      showNotes();
+      status('Opened ' + file.name + '. Pictures are included when you save as EPUB.');
     } catch (error) {
-      console.error(
-        'EPUB open error:',
-        error
-      );
-
-      status(
-        'EPUB error: ' +
-        (
-          error &&
-          error.message
-            ? error.message
-            : String(error)
-        )
-      );
-    }
+      resources.forEach(resource => URL.revokeObjectURL(resource.url));
+      status('Could not open EPUB: ' + error.message);
+    } finally { $('#openEpub').value = ''; }
   }
 
   const docxInput =
