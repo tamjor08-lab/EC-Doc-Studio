@@ -132,7 +132,7 @@ main{
   border-radius:14px;
   padding:14px;
   max-height:calc(100vh - 30px);
-  overflow:auto;
+  overflow:hidden;
   background:#f8faf8
 }
 
@@ -140,6 +140,9 @@ main{
   display:flex;
   flex-direction:column;
   gap:4px
+max-height:calc(100vh - 390px);
+overflow-y:auto;
+padding-right:4px;
 }
 
 .toc button{
