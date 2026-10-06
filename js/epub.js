@@ -172,7 +172,7 @@
           endEdit();
           st.current = index;
           render();
-          $('#bookPage').scrollIntoView({ behavior: 'smooth', block: 'start' }); 
+         $('#bookPage').scrollTop = 0; 
         };
 
         toc.appendChild(button);
@@ -1752,7 +1752,7 @@
         endEdit();
         st.current--;
         render();
-        $('#bookPage').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        $('#bookPage').scrollTop = 0;
       }
     };
   }
@@ -1766,7 +1766,7 @@
         endEdit();
         st.current++;
         render();
-       $('#bookPage').scrollIntoView({ behavior: 'smooth', block: 'start' }); 
+      $('#bookPage').scrollTop = 0;
       }
     };
   }
