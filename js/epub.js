@@ -51,181 +51,57 @@
   }
 
 function split(doc, mode) {
-  const chapters = [];
+    const chapters = [];
+    let current = {
+      title: null,
+      nodes: []
+    };
 
-  let current = {
-    title: null,
-    nodes: []
-  };
-
-  const isBreak = el => {
-    if (mode === 'h1') {
-      return el.tagName === 'H1';
-    }
-
-    if (mode === 'h12') {
-      return ['H1', 'H2'].includes(el.tagName);
-    }
-
-    return false;
-  };
-
-  const hasContent = chapter =>
-    chapter.nodes.some(node =>
-      node.textContent?.trim() ||
-      node.matches?.('img,svg') ||
-      node.querySelector?.('img,svg')
-    );
-
-  /*
-   * Mammoth creates footnote references such as:
-   * href="#footnote-1"
-   *
-   * and creates the actual notes elsewhere in the
-   * converted document. Save those note elements
-   * before splitting the document into chapters.
-   */
-  const footnotes = new Map();
-
-  doc.querySelectorAll('[id^="footnote-"]').forEach(note => {
-    footnotes.set(note.id, note);
-  });
-
-  /*
-   * Split the document normally.
-   */
-  [...doc.body.childNodes].forEach(node => {
-    if (
-      node.nodeType === 1 &&
-      isBreak(node)
-    ) {
-      if (hasContent(current)) {
-        chapters.push(current);
+    const isBreak = el => {
+      if (mode === 'h1') {
+        return el.tagName === 'H1';
       }
 
-      current = {
-        title:
-          node.textContent.trim() ||
-          'Untitled',
-        nodes: [node]
-      };
-    } else {
-      current.nodes.push(node);
-    }
-  });
-
-  if (hasContent(current)) {
-    chapters.push(current);
-  }
-
-  /*
-   * Find which footnotes are referenced by each
-   * chapter and append copies of those notes to
-   * that chapter.
-   */
-  chapters.forEach(chapter => {
-    const noteIds = new Set();
-
-    chapter.nodes.forEach(node => {
-      if (node.nodeType !== 1) {
-        return;
+      if (mode === 'h12') {
+        return ['H1', 'H2'].includes(el.tagName);
       }
 
-      const links = [];
+      return false;
+    };
 
-      if (
-        node.matches?.(
-          'a[href^="#footnote-"]'
-        )
-      ) {
-        links.push(node);
-      }
-
-      links.push(
-        ...node.querySelectorAll?.(
-          'a[href^="#footnote-"]'
-        ) || []
+    const hasContent = chapter =>
+      chapter.nodes.some(node =>
+        node.textContent?.trim() ||
+        node.matches?.('img,svg') || node.querySelector?.('img,svg')
       );
 
-      links.forEach(link => {
-        const href =
-          link.getAttribute('href');
-
-        if (
-          href &&
-          href.startsWith('#footnote-')
-        ) {
-          noteIds.add(
-            href.substring(1)
-          );
+    [...doc.body.childNodes].forEach(node => {
+      if (
+        node.nodeType === 1 &&
+        isBreak(node)
+      ) {
+        if (hasContent(current)) {
+          chapters.push(current);
         }
-      });
-    });
 
-    if (!noteIds.size) {
-      return;
-    }
-
-    const section =
-      doc.createElement('section');
-
-    section.className =
-      'ec-chapter-notes';
-
-    noteIds.forEach(id => {
-      const original =
-        footnotes.get(id);
-
-      if (!original) {
-        return;
+        current = {
+          title:
+            node.textContent.trim() ||
+            'Untitled',
+          nodes: [node]
+        };
+      } else {
+        current.nodes.push(node);
       }
-
-      const copy =
-        original.cloneNode(true);
-
-      /*
-       * Keep the destination ID on the copy so
-       * clicking the footnote number can jump
-       * directly to it.
-       */
-      section.appendChild(copy);
     });
 
-    if (section.childNodes.length) {
-      chapter.nodes.push(section);
+    if (hasContent(current)) {
+      chapters.push(current);
     }
-  });
 
-  /*
-   * Remove Mammoth's original footnote elements
-   * from their old locations. Each required note
-   * now lives with the chapter that references it.
-   */
-  const noteIds =
-    new Set(footnotes.keys());
+    return chapters;
+  }
 
-  chapters.forEach(chapter => {
-    chapter.nodes =
-      chapter.nodes.filter(node => {
-        if (node.nodeType !== 1) {
-          return true;
-        }
-
-        if (
-          noteIds.has(node.id) &&
-          !node.closest?.(
-            '.ec-chapter-notes'
-          )
-        ) {
-          return false;
-        }
-
-        return true;
-      });
-  });
-
-  return chapters;
-}
   function chapterTitle(chapter, index) {
     return (
       chapter.title ||
