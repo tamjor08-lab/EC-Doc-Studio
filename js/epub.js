@@ -50,57 +50,176 @@
     });
   }
 
-  function split(doc, mode) {
-    const chapters = [];
-    let current = {
-      title: null,
-      nodes: []
-    };
+function split(doc, mode) {
+  const chapters = [];
+  let current = {
+    title: null,
+    nodes: []
+  };
 
-    const isBreak = el => {
-      if (mode === 'h1') {
-        return el.tagName === 'H1';
-      }
-
-      if (mode === 'h12') {
-        return ['H1', 'H2'].includes(el.tagName);
-      }
-
-      return false;
-    };
-
-    const hasContent = chapter =>
-      chapter.nodes.some(node =>
-        node.textContent?.trim() ||
-        node.matches?.('img,svg') || node.querySelector?.('img,svg')
-      );
-
-    [...doc.body.childNodes].forEach(node => {
-      if (
-        node.nodeType === 1 &&
-        isBreak(node)
-      ) {
-        if (hasContent(current)) {
-          chapters.push(current);
-        }
-
-        current = {
-          title:
-            node.textContent.trim() ||
-            'Untitled',
-          nodes: [node]
-        };
-      } else {
-        current.nodes.push(node);
-      }
-    });
-
-    if (hasContent(current)) {
-      chapters.push(current);
+  const isBreak = el => {
+    if (mode === 'h1') {
+      return el.tagName === 'H1';
     }
 
-    return chapters;
+    if (mode === 'h12') {
+      return ['H1', 'H2'].includes(el.tagName);
+    }
+
+    return false;
+  };
+
+  const hasContent = chapter =>
+    chapter.nodes.some(node =>
+      node.textContent?.trim() ||
+      node.matches?.('img,svg') ||
+      node.querySelector?.('img,svg')
+    );
+
+  /*
+   * Mammoth places Word footnotes/endnotes in a notes
+   * section near the end of the converted document.
+   * Save those note elements before splitting the book
+   * into chapters so they can follow their references.
+   */
+  const notesById = new Map();
+
+  doc.querySelectorAll('[id]').forEach(element => {
+    const id = element.id || '';
+
+    if (
+      /^(?:footnote|endnote)-\d+$/i.test(id)
+    ) {
+      notesById.set(id, element);
+    }
+  });
+
+  [...doc.body.childNodes].forEach(node => {
+    if (
+      node.nodeType === 1 &&
+      isBreak(node)
+    ) {
+      if (hasContent(current)) {
+        chapters.push(current);
+      }
+
+      current = {
+        title:
+          node.textContent.trim() ||
+          'Untitled',
+        nodes: [node]
+      };
+    } else {
+      current.nodes.push(node);
+    }
+  });
+
+  if (hasContent(current)) {
+    chapters.push(current);
   }
+
+  /*
+   * For every chapter, find footnote/endnote references
+   * such as href="#footnote-8". If the corresponding
+   * note is elsewhere in the converted document, clone
+   * that note into the chapter containing its reference.
+   *
+   * This keeps references and their notes together in
+   * both the EC Doc Studio reader and exported EPUB.
+   */
+  chapters.forEach(chapter => {
+    const neededIds = new Set();
+
+    chapter.nodes.forEach(node => {
+      if (node.nodeType !== 1) return;
+
+      const links = [];
+
+      if (
+        node.matches?.(
+          'a[href^="#footnote-"],' +
+          'a[href^="#endnote-"]'
+        )
+      ) {
+        links.push(node);
+      }
+
+      links.push(
+        ...node.querySelectorAll?.(
+          'a[href^="#footnote-"],' +
+          'a[href^="#endnote-"]'
+        ) || []
+      );
+
+      links.forEach(link => {
+        const href =
+          link.getAttribute('href') || '';
+
+        if (href.startsWith('#')) {
+          neededIds.add(
+            decodeURIComponent(
+              href.slice(1)
+            )
+          );
+        }
+      });
+    });
+
+    if (!neededIds.size) return;
+
+    const noteContainer =
+      doc.createElement('section');
+
+    noteContainer.className =
+      'ec-chapter-notes';
+
+    neededIds.forEach(id => {
+      const note =
+        notesById.get(id);
+
+      if (!note) return;
+
+      noteContainer.appendChild(
+        note.cloneNode(true)
+      );
+    });
+
+    if (noteContainer.childNodes.length) {
+      chapter.nodes.push(noteContainer);
+    }
+  });
+
+  /*
+   * Remove original footnote/endnote blocks that no
+   * longer belong to the chapter in which Mammoth
+   * happened to place them. The cloned copies above
+   * are now stored with their actual chapters.
+   */
+  const noteIds =
+    new Set(notesById.keys());
+
+  chapters.forEach(chapter => {
+    chapter.nodes =
+      chapter.nodes.filter(node => {
+        if (node.nodeType !== 1) {
+          return true;
+        }
+
+        if (
+          noteIds.has(node.id) &&
+          !node.closest?.(
+            '.ec-chapter-notes'
+          )
+        ) {
+          return false;
+        }
+
+        return true;
+      });
+  });
+
+  return chapters;
+}
 
   function chapterTitle(chapter, index) {
     return (
