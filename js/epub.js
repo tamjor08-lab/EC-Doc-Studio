@@ -944,7 +944,13 @@ function split(doc, mode) {
               )
           }
         );
-  
+       const figureDebug =
+       result.value.match(/.{0,1200}Figure 1 List of Nations.{0,500}/i);
+
+       console.log(
+      'FIGURE 1 DEBUG:',
+      figureDebug?.[0]
+);
       st.html =
         normalizeFigures(
           result.value || ''
