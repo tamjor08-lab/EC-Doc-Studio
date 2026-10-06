@@ -283,6 +283,405 @@
     box.hidden = false;
   }
 
+   function normalizeFigures(html) {
+    const doc =
+      new DOMParser().parseFromString(
+        '<!doctype html><html><body>' +
+        html +
+        '</body></html>',
+        'text/html'
+      );
+
+    const blocks =
+      [...doc.body.children];
+
+    const hasImage = element =>
+      element.matches('img') ||
+      Boolean(element.querySelector('img'));
+
+    const captionText = element =>
+      (element.textContent || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const looksLikeCaption = element => {
+      if (!element) return false;
+
+      if (!['P', 'DIV'].includes(element.tagName)) {
+        return false;
+      }
+
+      if (hasImage(element)) {
+        return false;
+      }
+
+      const text =
+        captionText(element);
+
+      if (!text || text.length > 500) {
+        return false;
+      }
+
+      /*
+       * Strong caption signals:
+       * Figure 1, Fig. 2, Photo 3, Image 4,
+       * Illustration 5, Plate 6, etc.
+       */
+      if (
+        /^(?:figure|fig\.?|photo(?:graph)?|image|illustration|plate)\s*(?:[:.#-]?\s*)?\d+/i
+          .test(text)
+      ) {
+        return true;
+      }
+
+      /*
+       * Mammoth can preserve a Word Caption style as
+       * a class name when one is present.
+       */
+      const className =
+        element.getAttribute('class') || '';
+
+      if (
+        /\bcaption\b/i.test(className)
+      ) {
+        return true;
+      }
+
+      return false;
+    };
+
+    blocks.forEach(block => {
+      if (!block.isConnected) return;
+      if (!hasImage(block)) return;
+      if (block.closest('figure')) return;
+
+      let caption =
+        block.nextElementSibling;
+
+      /*
+       * Allow one empty paragraph between an image and
+       * its caption because Word documents sometimes
+       * contain a spacer paragraph.
+       */
+      if (
+        caption &&
+        !captionText(caption) &&
+        !hasImage(caption)
+      ) {
+        caption =
+          caption.nextElementSibling;
+      }
+
+      if (!looksLikeCaption(caption)) {
+        return;
+      }
+
+      const figure =
+        doc.createElement('figure');
+
+      figure.className =
+        'ec-figure';
+
+      block.parentNode.insertBefore(
+        figure,
+        block
+      );
+
+      figure.appendChild(block);
+
+      const figcaption =
+        doc.createElement('figcaption');
+
+      figcaption.innerHTML =
+        caption.innerHTML;
+
+      figure.appendChild(figcaption);
+
+      caption.remove();
+    });
+
+    return doc.body.innerHTML;
+  }  
+  
+  async function openPdf(file) {
+    if (!file) return;
+
+    releaseResources();
+    st.archive = null;
+    st.packagePath = null;
+    endEdit();
+
+    status('Reading PDF…');
+
+    st.external = false;
+
+    st.images.forEach(image => {
+      if (image.url) {
+        URL.revokeObjectURL(image.url);
+      }
+    });
+
+    st.images = new Map();
+    st.notes = [];
+    st.html = '';
+    st.chapters = [];
+    st.current = 0;
+
+    try {
+      if (typeof pdfjsLib === 'undefined') {
+        throw new Error(
+          'The PDF reader library did not load. Refresh the page and try again.'
+        );
+      }
+
+      const arrayBuffer = await file.arrayBuffer();
+
+      const pdf = await pdfjsLib
+        .getDocument({ data: arrayBuffer })
+        .promise;
+
+      const pages = [];
+
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+        status(
+          `Reading PDF page ${pageNumber} of ${pdf.numPages}…`
+        );
+
+        const page = await pdf.getPage(pageNumber);
+        const textContent = await page.getTextContent();
+
+        const items = textContent.items
+          .filter(item => item.str && item.str.trim())
+          .map(item => ({
+            text: item.str.trim(),
+            x: item.transform[4],
+            y: item.transform[5],
+            height:
+              Math.abs(item.height) ||
+              Math.abs(item.transform[3]) ||
+              12
+          }));
+
+        /*
+         * PDF files store text by position rather than as ordinary
+         * paragraphs. Group pieces that sit on approximately the
+         * same horizontal line.
+         */
+        items.sort((a, b) => {
+          const yDifference = b.y - a.y;
+
+          if (Math.abs(yDifference) > 3) {
+            return yDifference;
+          }
+
+          return a.x - b.x;
+        });
+
+        const lines = [];
+
+        items.forEach(item => {
+          let line = lines.find(
+            existing =>
+              Math.abs(existing.y - item.y) <=
+              Math.max(3, item.height * 0.3)
+          );
+
+          if (!line) {
+            line = {
+              y: item.y,
+              height: item.height,
+              items: []
+            };
+
+            lines.push(line);
+          }
+
+          line.items.push(item);
+          line.height = Math.max(
+            line.height,
+            item.height
+          );
+        });
+
+        lines.sort((a, b) => b.y - a.y);
+
+        const pageElement =
+          document.createElement('section');
+
+        pageElement.className = 'pdf-import-page';
+        pageElement.dataset.pdfPage = pageNumber;
+
+        let previousLine = null;
+        let paragraph = null;
+
+        lines.forEach(line => {
+          line.items.sort((a, b) => a.x - b.x);
+
+          const text = line.items
+            .map(item => item.text)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+          if (!text) return;
+
+          const averageHeight =
+            line.items.reduce(
+              (total, item) =>
+                total + item.height,
+              0
+            ) / line.items.length;
+
+          /*
+           * Larger text is treated as a possible heading.
+           * This is intentionally conservative because PDFs do
+           * not contain Word-style heading information.
+           */
+          const looksLikeHeading =
+            averageHeight >= 16 &&
+            text.length <= 120;
+
+          if (looksLikeHeading) {
+            const heading =
+              document.createElement('h2');
+
+            heading.textContent = text;
+            pageElement.appendChild(heading);
+
+            paragraph = null;
+            previousLine = line;
+            return;
+          }
+
+          const gap =
+            previousLine
+              ? previousLine.y - line.y
+              : 0;
+
+          const normalGap =
+            Math.max(
+              previousLine?.height || 12,
+              line.height
+            );
+
+          const startsNewParagraph =
+            !paragraph ||
+            !previousLine ||
+            gap > normalGap * 1.65;
+
+          if (startsNewParagraph) {
+            paragraph =
+              document.createElement('p');
+
+            paragraph.textContent = text;
+
+            pageElement.appendChild(
+              paragraph
+            );
+          } else {
+            const oldText =
+              paragraph.textContent;
+
+            /*
+             * Rejoin words broken with a hyphen at the end of
+             * a PDF line when it looks like ordinary word wrapping.
+             */
+            if (
+              /[A-Za-z]-$/.test(oldText) &&
+              /^[a-z]/.test(text)
+            ) {
+              paragraph.textContent =
+                oldText.slice(0, -1) + text;
+            } else {
+              paragraph.textContent =
+                oldText + ' ' + text;
+            }
+          }
+
+          previousLine = line;
+        });
+
+        if (!pageElement.childNodes.length) {
+          const empty =
+            document.createElement('p');
+
+          empty.textContent =
+            `[Page ${pageNumber} contains no extractable text.]`;
+
+          pageElement.appendChild(empty);
+        }
+
+        pages.push(pageElement);
+      }
+
+      /*
+       * PDF import produces editable HTML. Page markers are kept
+       * in the HTML so the original page progression is not lost,
+       * but EPUB chapter splitting can still use detected headings.
+       */
+      st.html = pages
+        .map(page => page.outerHTML)
+        .join('\n');
+
+      st.notes.push(
+        'PDFs store text by position rather than as paragraphs. EC Doc Studio reconstructed the text into editable paragraphs; check line breaks, headings, columns, and special formatting before saving the EPUB.'
+      );
+
+      st.notes.push(
+        'PDF pictures are not automatically transferred by this importer yet. The PDF text is editable, but image-heavy PDFs should be checked against the original.'
+      );
+
+      const titleField =
+        $('#bookTitle');
+
+      if (titleField) {
+        titleField.value =
+          file.name.replace(/\.pdf$/i, '');
+      }
+
+      const authorField =
+        $('#bookAuthor');
+
+      if (authorField) {
+        authorField.value = '';
+      }
+
+      showNotes();
+      refresh();
+
+      if (!st.chapters.length) {
+        throw new Error(
+          'The PDF was read, but no extractable text was found.'
+        );
+      }
+
+      status(
+        `Loaded ${file.name}. Review the reconstructed text before saving as EPUB.`
+      );
+    } catch (error) {
+      console.error(
+        'PDF import error:',
+        error
+      );
+
+      status(
+        'PDF error: ' +
+        (
+          error && error.message
+            ? error.message
+            : String(error)
+        )
+      );
+    } finally {
+      const input =
+        $('#pdfEpubFile');
+
+      if (input) {
+        input.value = '';
+      }
+    }
+  }
+  
   async function openDocx(file) {
     if (!file) return;
 
@@ -392,7 +791,9 @@
         );
 
       st.html =
-        result.value || '';
+        normalizeFigures(
+          result.value || ''
+        );
 
       st.notes =
         (
@@ -460,6 +861,11 @@
 
     page.focus();
 
+        if ($('#editToolbar')) {
+      $('#editToolbar').hidden =
+        false;
+    }
+    
     if ($('#editChapter')) {
       $('#editChapter').hidden =
         true;
@@ -563,6 +969,11 @@
         'false';
     }
 
+        if ($('#editToolbar')) {
+      $('#editToolbar').hidden =
+        true;
+    }
+    
     if ($('#editChapter')) {
       $('#editChapter').hidden =
         false;
@@ -579,11 +990,134 @@
     }
   }
 
+   function editorPage() {
+    const page = $('#bookPage');
+
+    if (!page || !page.isContentEditable) {
+      return null;
+    }
+
+    return page;
+  }
+
+  function runEditCommand(command) {
+    const page = editorPage();
+
+    if (!page) return;
+
+    page.focus();
+
+    try {
+      document.execCommand(
+        command,
+        false,
+        null
+      );
+    } catch (error) {
+      console.warn(
+        `Editor command ${command} failed:`,
+        error
+      );
+    }
+  }
+
+  function undoChapterEdit() {
+    runEditCommand('undo');
+  }
+
+  function redoChapterEdit() {
+    runEditCommand('redo');
+  }
+
+  function cutChapterEdit() {
+    runEditCommand('cut');
+  }
+
+  function copyChapterEdit() {
+    const page = editorPage();
+
+    if (!page) return;
+
+    page.focus();
+
+    try {
+      document.execCommand(
+        'copy',
+        false,
+        null
+      );
+    } catch (error) {
+      console.warn(
+        'Copy failed:',
+        error
+      );
+    }
+  }
+
+  async function pasteChapterEdit() {
+    const page = editorPage();
+
+    if (!page) return;
+
+    page.focus();
+
+    try {
+      if (
+        navigator.clipboard &&
+        navigator.clipboard.readText
+      ) {
+        const text =
+          await navigator.clipboard.readText();
+
+        if (!text) return;
+
+        document.execCommand(
+          'insertText',
+          false,
+          text
+        );
+
+        return;
+      }
+    } catch (error) {
+      console.warn(
+        'Clipboard paste permission was not available:',
+        error
+      );
+    }
+
+    /*
+     * Some browsers do not allow a web page to read
+     * the clipboard directly. Try the browser's normal
+     * paste command as a fallback.
+     */
+    try {
+      const worked =
+        document.execCommand(
+          'paste',
+          false,
+          null
+        );
+
+      if (!worked) {
+        status(
+          'Your browser blocked the Paste button. Click in the chapter and use Ctrl+V instead.'
+        );
+      }
+    } catch (error) {
+      status(
+        'Your browser blocked the Paste button. Click in the chapter and use Ctrl+V instead.'
+      );
+    }
+  }
+  
   function bookCss() {
     return [
       'body{line-height:1.5;}',
       'p{margin:0 0 .7em;}',
       'img{max-width:100%;height:auto;}',
+      'figure{break-inside:avoid;page-break-inside:avoid;margin:1em auto;}',
+      'figcaption{margin-top:.4em;font-size:.92em;line-height:1.35;text-align:center;}',
       'h1,h2,h3{line-height:1.25;}'
     ].join('');
   }
@@ -1128,6 +1662,9 @@
   const docxInput =
     $('#docxFile');
 
+  const pdfInput =
+    $('#pdfEpubFile');
+  
   const epubInput =
     $('#openEpub');
 
@@ -1149,6 +1686,24 @@
   const cancel =
     $('#cancelEdit');
 
+    const editToolbar =
+    $('#editToolbar');
+
+  const undoEdit =
+    $('#undoEdit');
+
+  const redoEdit =
+    $('#redoEdit');
+
+  const cutEdit =
+    $('#cutEdit');
+
+  const copyEdit =
+    $('#copyEdit');
+
+  const pasteEdit =
+    $('#pasteEdit');
+  
   const buildButton =
     $('#buildEpub');
 
@@ -1166,6 +1721,14 @@
         );
   }
 
+  if (pdfInput) {
+    pdfInput.onchange =
+      event =>
+        openPdf(
+          event.target.files[0]
+        );
+  }
+  
   if (epubInput) {
     epubInput.onchange =
       event =>
@@ -1222,6 +1785,31 @@
     };
   }
 
+    if (undoEdit) {
+    undoEdit.onclick =
+      undoChapterEdit;
+  }
+
+  if (redoEdit) {
+    redoEdit.onclick =
+      redoChapterEdit;
+  }
+
+  if (cutEdit) {
+    cutEdit.onclick =
+      cutChapterEdit;
+  }
+
+  if (copyEdit) {
+    copyEdit.onclick =
+      copyChapterEdit;
+  }
+
+  if (pasteEdit) {
+    pasteEdit.onclick =
+      pasteChapterEdit;
+  }
+  
   if (buildButton) {
     buildButton.onclick =
       buildEpub;
