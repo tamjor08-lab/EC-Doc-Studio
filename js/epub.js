@@ -52,6 +52,7 @@
 
 function split(doc, mode) {
   const chapters = [];
+
   let current = {
     title: null,
     nodes: []
@@ -77,23 +78,22 @@ function split(doc, mode) {
     );
 
   /*
-   * Mammoth places Word footnotes/endnotes in a notes
-   * section near the end of the converted document.
-   * Save those note elements before splitting the book
-   * into chapters so they can follow their references.
+   * Mammoth creates footnote references such as:
+   * href="#footnote-1"
+   *
+   * and creates the actual notes elsewhere in the
+   * converted document. Save those note elements
+   * before splitting the document into chapters.
    */
-  const notesById = new Map();
+  const footnotes = new Map();
 
-  doc.querySelectorAll('[id]').forEach(element => {
-    const id = element.id || '';
-
-    if (
-      /^(?:footnote|endnote)-\d+$/i.test(id)
-    ) {
-      notesById.set(id, element);
-    }
+  doc.querySelectorAll('[id^="footnote-"]').forEach(note => {
+    footnotes.set(note.id, note);
   });
 
+  /*
+   * Split the document normally.
+   */
   [...doc.body.childNodes].forEach(node => {
     if (
       node.nodeType === 1 &&
@@ -119,26 +119,23 @@ function split(doc, mode) {
   }
 
   /*
-   * For every chapter, find footnote/endnote references
-   * such as href="#footnote-8". If the corresponding
-   * note is elsewhere in the converted document, clone
-   * that note into the chapter containing its reference.
-   *
-   * This keeps references and their notes together in
-   * both the EC Doc Studio reader and exported EPUB.
+   * Find which footnotes are referenced by each
+   * chapter and append copies of those notes to
+   * that chapter.
    */
   chapters.forEach(chapter => {
-    const neededIds = new Set();
+    const noteIds = new Set();
 
     chapter.nodes.forEach(node => {
-      if (node.nodeType !== 1) return;
+      if (node.nodeType !== 1) {
+        return;
+      }
 
       const links = [];
 
       if (
         node.matches?.(
-          'a[href^="#footnote-"],' +
-          'a[href^="#endnote-"]'
+          'a[href^="#footnote-"]'
         )
       ) {
         links.push(node);
@@ -146,57 +143,66 @@ function split(doc, mode) {
 
       links.push(
         ...node.querySelectorAll?.(
-          'a[href^="#footnote-"],' +
-          'a[href^="#endnote-"]'
+          'a[href^="#footnote-"]'
         ) || []
       );
 
       links.forEach(link => {
         const href =
-          link.getAttribute('href') || '';
+          link.getAttribute('href');
 
-        if (href.startsWith('#')) {
-          neededIds.add(
-            decodeURIComponent(
-              href.slice(1)
-            )
+        if (
+          href &&
+          href.startsWith('#footnote-')
+        ) {
+          noteIds.add(
+            href.substring(1)
           );
         }
       });
     });
 
-    if (!neededIds.size) return;
+    if (!noteIds.size) {
+      return;
+    }
 
-    const noteContainer =
+    const section =
       doc.createElement('section');
 
-    noteContainer.className =
+    section.className =
       'ec-chapter-notes';
 
-    neededIds.forEach(id => {
-      const note =
-        notesById.get(id);
+    noteIds.forEach(id => {
+      const original =
+        footnotes.get(id);
 
-      if (!note) return;
+      if (!original) {
+        return;
+      }
 
-      noteContainer.appendChild(
-        note.cloneNode(true)
-      );
+      const copy =
+        original.cloneNode(true);
+
+      /*
+       * Keep the destination ID on the copy so
+       * clicking the footnote number can jump
+       * directly to it.
+       */
+      section.appendChild(copy);
     });
 
-    if (noteContainer.childNodes.length) {
-      chapter.nodes.push(noteContainer);
+    if (section.childNodes.length) {
+      chapter.nodes.push(section);
     }
   });
 
   /*
-   * Remove original footnote/endnote blocks that no
-   * longer belong to the chapter in which Mammoth
-   * happened to place them. The cloned copies above
-   * are now stored with their actual chapters.
+   * Remove Mammoth's original footnote elements
+   * from their old locations. Each required note
+   * now lives with the chapter that references it.
    */
   const noteIds =
-    new Set(notesById.keys());
+    new Set(footnotes.keys());
 
   chapters.forEach(chapter => {
     chapter.nodes =
@@ -220,7 +226,6 @@ function split(doc, mode) {
 
   return chapters;
 }
-
   function chapterTitle(chapter, index) {
     return (
       chapter.title ||
@@ -852,10 +857,10 @@ function split(doc, mode) {
             styleMap: [
               "p[style-name='Title'] => h1.book-title:fresh",
               "p[style-name='Subtitle'] => h2.book-subtitle:fresh",
-              "p[style-name='Heading 1'] => h1:fresh",
               "p[style-name='Heading 2'] => h2:fresh",
-              "p[style-name='Heading 3'] => h3:fresh"
-            ],
+              "p[style-name='Heading 3'] => h3:fresh",
+              "p[style-name='Caption'] => p.ec-word-caption:fresh"
+],
 
             convertImage:
               mammoth.images.imgElement(
