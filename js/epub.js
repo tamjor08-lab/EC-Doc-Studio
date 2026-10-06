@@ -790,7 +790,8 @@ function split(doc, mode) {
               )
           }
         );
-        console.log('MAMMOTH RAW HTML:', result.value);
+      console.log('MAMMOTH HAS FOOTNOTE-1:', result.value.includes('footnote-1'));
+      console.log('MAMMOTH HAS FOOTNOTE:', result.value.toLowerCase().includes('footnote'));
       st.html =
         normalizeFigures(
           result.value || ''
