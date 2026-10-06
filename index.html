@@ -1,7 +1,234 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EC Doc Studio</title><link rel="stylesheet" href="css/styles.css"></head><body>
-<header><div><h1>EC Doc Studio</h1><div class="tag">Open • Read • Edit • Save EPUB</div></div><div class="badge">Elemental Cre8tions • v3</div></header>
-<main><section class="workspace"><div id="epub" class="pane active"><div class="workspace-head"><div><h2>EPUB Workspace</h2><p>Open a Word manuscript or an EPUB. The navigation stays beside the book while you read or edit.</p></div><div class="actions"><label class="btn file">Open DOCX<input id="docxFile" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"></label><label class="btn secondary file">Open EPUB<input id="openEpub" type="file" accept=".epub,application/epub+zip"></label></div></div>
-<div id="epubStatus" class="status">No book loaded.</div><div class="book-workspace"><aside class="book-side"><h3>Contents</h3><div id="bookToc" class="toc"><span class="muted">Chapters will appear here.</span></div><div class="side-nav"><button id="prevChapter" class="btn secondary" disabled>Previous</button><button id="nextChapter" class="btn secondary" disabled>Next</button></div><hr><button id="editChapter" class="btn secondary" disabled>Edit chapter</button><button id="saveChapter" class="btn" hidden>Save chapter</button><button id="cancelEdit" class="btn secondary" hidden>Cancel</button><hr><label>Text size<input id="readerSize" type="range" min="85" max="145" value="100" step="5"></label><button id="readerTheme" class="btn secondary">Dark reader</button></aside><section class="book-main"><div class="book-meta"><label>Title<input id="bookTitle" type="text"></label><label>Author<input id="bookAuthor" type="text"></label><label>Language<input id="bookLang" type="text" value="en"></label><label>Split<select id="chapterSplit"><option value="h1">Heading 1</option><option value="h12">Heading 1 + 2</option><option value="none">One chapter</option></select></label></div><article id="bookPage" class="book-page"><p class="muted">Open a DOCX or EPUB to begin.</p></article><div class="exportbar"><button id="buildEpub" class="btn" disabled>Save as EPUB</button></div><details id="conversionNotes" hidden><summary id="conversionSummary"></summary><ul id="conversionList"></ul></details></section></div></div>
-</section></main>
-<footer>EC Doc Studio • by Elemental Cre8tions</footer>
-<script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script><script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script><script src="js/app.js"></script><script src="js/epub.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>EC Doc Studio</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body>
+<header>
+  <div>
+    <h1>EC Doc Studio</h1>
+    <div class="tag">Open • Read • Edit • Save EPUB</div>
+  </div>
+  <div class="badge">Elemental Cre8tions • v3</div>
+</header>
+
+<main>
+  <section class="workspace">
+    <div id="epub" class="pane active">
+
+      <div class="workspace-head">
+        <div>
+          <h2>EPUB Workspace</h2>
+          <p>
+            Open a Word manuscript, PDF, or EPUB.
+            The navigation stays beside the book while you read or edit.
+          </p>
+        </div>
+
+        <div class="actions">
+          <label class="btn file">
+            Open DOCX
+            <input
+              id="docxFile"
+              type="file"
+              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+          </label>
+
+          <label class="btn secondary file">
+            Open PDF
+            <input
+              id="pdfEpubFile"
+              type="file"
+              accept=".pdf,application/pdf">
+          </label>
+
+          <label class="btn secondary file">
+            Open EPUB
+            <input
+              id="openEpub"
+              type="file"
+              accept=".epub,application/epub+zip">
+          </label>
+        </div>
+      </div>
+
+      <div id="epubStatus" class="status">
+        No book loaded.
+      </div>
+
+      <div class="book-workspace">
+
+        <aside class="book-side">
+          <h3>Contents</h3>
+
+          <div id="bookToc" class="toc">
+            <span class="muted">Chapters will appear here.</span>
+          </div>
+
+          <div class="side-nav">
+            <button id="prevChapter" class="btn secondary" disabled>
+              Previous
+            </button>
+
+            <button id="nextChapter" class="btn secondary" disabled>
+              Next
+            </button>
+          </div>
+
+          <hr>
+
+          <button id="editChapter" class="btn secondary" disabled>
+            Edit chapter
+          </button>
+
+          <button id="saveChapter" class="btn" hidden>
+            Save chapter
+          </button>
+
+          <button id="cancelEdit" class="btn secondary" hidden>
+            Cancel
+          </button>
+
+          <hr>
+
+          <label>
+            Text size
+            <input
+              id="readerSize"
+              type="range"
+              min="85"
+              max="145"
+              value="100"
+              step="5">
+          </label>
+
+          <button id="readerTheme" class="btn secondary">
+            Dark reader
+          </button>
+        </aside>
+
+        <section class="book-main">
+
+          <div class="book-meta">
+            <label>
+              Title
+              <input id="bookTitle" type="text">
+            </label>
+
+            <label>
+              Author
+              <input id="bookAuthor" type="text">
+            </label>
+
+            <label>
+              Language
+              <input id="bookLang" type="text" value="en">
+            </label>
+
+            <label>
+              Split
+              <select id="chapterSplit">
+                <option value="h1">Heading 1</option>
+                <option value="h12">Heading 1 + 2</option>
+                <option value="none">One chapter</option>
+              </select>
+            </label>
+          </div>
+
+          <!-- Editing controls -->
+          <div id="editToolbar" class="edit-toolbar" hidden>
+            <button
+              id="undoEdit"
+              class="btn secondary edit-tool"
+              type="button"
+              title="Undo">
+              ↶ Undo
+            </button>
+
+            <button
+              id="redoEdit"
+              class="btn secondary edit-tool"
+              type="button"
+              title="Redo">
+              ↷ Redo
+            </button>
+
+            <span class="toolbar-divider"></span>
+
+            <button
+              id="cutEdit"
+              class="btn secondary edit-tool"
+              type="button"
+              title="Cut selected text">
+              Cut
+            </button>
+
+            <button
+              id="copyEdit"
+              class="btn secondary edit-tool"
+              type="button"
+              title="Copy selected text">
+              Copy
+            </button>
+
+            <button
+              id="pasteEdit"
+              class="btn secondary edit-tool"
+              type="button"
+              title="Paste">
+              Paste
+            </button>
+          </div>
+
+          <article id="bookPage" class="book-page">
+            <p class="muted">
+              Open a DOCX, PDF, or EPUB to begin.
+            </p>
+          </article>
+
+          <div class="exportbar">
+            <button id="buildEpub" class="btn" disabled>
+              Save as EPUB
+            </button>
+          </div>
+
+          <details id="conversionNotes" hidden>
+            <summary id="conversionSummary"></summary>
+            <ul id="conversionList"></ul>
+          </details>
+
+        </section>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  EC Doc Studio • by Elemental Cre8tions
+</footer>
+
+<!-- DOCX reader -->
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+
+<!-- ZIP / EPUB packaging -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+<!-- PDF reader -->
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+
+<script>
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+  }
+</script>
+
+<script src="js/app.js"></script>
+<script src="js/epub.js"></script>
+
+</body>
+</html>
