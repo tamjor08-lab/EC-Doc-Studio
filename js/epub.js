@@ -379,124 +379,184 @@ function split(doc, mode) {
   }
 
    function normalizeFigures(html) {
-    const doc =
-      new DOMParser().parseFromString(
-        '<!doctype html><html><body>' +
-        html +
-        '</body></html>',
-        'text/html'
-      );
+  const doc =
+    new DOMParser().parseFromString(
+      '<!doctype html><html><body>' +
+      html +
+      '</body></html>',
+      'text/html'
+    );
 
-    const blocks =
-      [...doc.body.children];
+  const hasImage = element =>
+    element &&
+    (
+      element.matches?.('img') ||
+      Boolean(element.querySelector?.('img'))
+    );
 
-    const hasImage = element =>
-      element.matches('img') ||
-      Boolean(element.querySelector('img'));
+  const captionText = element =>
+    (element?.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim();
 
-    const captionText = element =>
-      (element.textContent || '')
-        .replace(/\s+/g, ' ')
-        .trim();
+  const looksLikeCaption = element => {
+    if (!element) return false;
 
-    const looksLikeCaption = element => {
-      if (!element) return false;
-
-      if (!['P', 'DIV'].includes(element.tagName)) {
-        return false;
-      }
-
-      if (hasImage(element)) {
-        return false;
-      }
-
-      const text =
-        captionText(element);
-
-      if (!text || text.length > 500) {
-        return false;
-      }
-
-      /*
-       * Strong caption signals:
-       * Figure 1, Fig. 2, Photo 3, Image 4,
-       * Illustration 5, Plate 6, etc.
-       */
-      if (
-        /^(?:figure|fig\.?|photo(?:graph)?|image|illustration|plate)\s*(?:[:.#-]?\s*)?\d+/i
-          .test(text)
-      ) {
-        return true;
-      }
-
-      /*
-       * Mammoth can preserve a Word Caption style as
-       * a class name when one is present.
-       */
-      const className =
-        element.getAttribute('class') || '';
-
-      if (
-        /\bcaption\b/i.test(className)
-      ) {
-        return true;
-      }
-
+    if (!['P', 'DIV'].includes(element.tagName)) {
       return false;
-    };
+    }
 
-    blocks.forEach(block => {
-      if (!block.isConnected) return;
-      if (!hasImage(block)) return;
-      if (block.closest('figure')) return;
+    if (hasImage(element)) {
+      return false;
+    }
 
-      let caption =
-        block.nextElementSibling;
+    const text =
+      captionText(element);
+
+    if (!text || text.length > 500) {
+      return false;
+    }
+
+    /*
+     * Word captions mapped by Mammoth.
+     */
+    if (
+      element.classList.contains(
+        'ec-word-caption'
+      )
+    ) {
+      return true;
+    }
+
+    /*
+     * Fallback for captions that were not given
+     * Word's Caption paragraph style.
+     */
+    if (
+      /^(?:figure|fig\.?|photo(?:graph)?|image|illustration|plate)\s*(?:[:.#-]?\s*)?\d+/i
+        .test(text)
+    ) {
+      return true;
+    }
+
+    const className =
+      element.getAttribute('class') || '';
+
+    return /\bcaption\b/i.test(className);
+  };
+
+  /*
+   * A Word document may contain:
+   *
+   *   image
+   *   image
+   *   caption
+   *
+   * as well as the simpler:
+   *
+   *   image
+   *   caption
+   *
+   * Work from the caption backward so every
+   * consecutive image belonging to that caption
+   * becomes one figure group.
+   */
+  const captions =
+    [...doc.body.children]
+      .filter(looksLikeCaption);
+
+  captions.forEach(caption => {
+    if (!caption.isConnected) return;
+    if (caption.closest('figure')) return;
+
+    const imageBlocks = [];
+
+    let previous =
+      caption.previousElementSibling;
+
+    /*
+     * Allow empty paragraphs between an image
+     * and its caption.
+     */
+    while (
+      previous &&
+      !captionText(previous) &&
+      !hasImage(previous)
+    ) {
+      const empty =
+        previous;
+
+      previous =
+        previous.previousElementSibling;
+
+      empty.remove();
+    }
+
+    /*
+     * Collect every consecutive image block
+     * immediately before this caption.
+     */
+    while (
+      previous &&
+      hasImage(previous) &&
+      !previous.closest('figure')
+    ) {
+      imageBlocks.unshift(previous);
+
+      previous =
+        previous.previousElementSibling;
 
       /*
-       * Allow one empty paragraph between an image and
-       * its caption because Word documents sometimes
-       * contain a spacer paragraph.
+       * Skip harmless empty paragraphs between
+       * consecutive images.
        */
-      if (
-        caption &&
-        !captionText(caption) &&
-        !hasImage(caption)
+      while (
+        previous &&
+        !captionText(previous) &&
+        !hasImage(previous)
       ) {
-        caption =
-          caption.nextElementSibling;
+        const empty =
+          previous;
+
+        previous =
+          previous.previousElementSibling;
+
+        empty.remove();
       }
+    }
 
-      if (!looksLikeCaption(caption)) {
-        return;
-      }
+    if (!imageBlocks.length) {
+      return;
+    }
 
-      const figure =
-        doc.createElement('figure');
+    const figure =
+      doc.createElement('figure');
 
-      figure.className =
-        'ec-figure';
+    figure.className =
+      'ec-figure';
 
-      block.parentNode.insertBefore(
-        figure,
-        block
-      );
+    imageBlocks[0].parentNode.insertBefore(
+      figure,
+      imageBlocks[0]
+    );
 
+    imageBlocks.forEach(block => {
       figure.appendChild(block);
-
-      const figcaption =
-        doc.createElement('figcaption');
-
-      figcaption.innerHTML =
-        caption.innerHTML;
-
-      figure.appendChild(figcaption);
-
-      caption.remove();
     });
 
-    return doc.body.innerHTML;
-  }  
+    const figcaption =
+      doc.createElement('figcaption');
+
+    figcaption.innerHTML =
+      caption.innerHTML;
+
+    figure.appendChild(figcaption);
+
+    caption.remove();
+  });
+
+  return doc.body.innerHTML;
+}
   
   async function openPdf(file) {
     if (!file) return;
@@ -884,8 +944,7 @@ function split(doc, mode) {
               )
           }
         );
-    const captionDebug = result.value.match(/.{0,500}(?:ec-word-caption|caption).{0,500}/gi);
-    console.log('MAMMOTH CAPTION HTML:', captionDebug);
+  
       st.html =
         normalizeFigures(
           result.value || ''
