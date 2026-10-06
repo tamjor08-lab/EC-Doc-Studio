@@ -51,56 +51,150 @@
   }
 
 function split(doc, mode) {
-    const chapters = [];
-    let current = {
-      title: null,
-      nodes: []
-    };
+  const chapters = [];
 
-    const isBreak = el => {
-      if (mode === 'h1') {
-        return el.tagName === 'H1';
+  /*
+   * Mammoth puts DOCX footnotes into one ordered list at
+   * the end of the converted document. Save those notes
+   * before dividing the manuscript into chapters.
+   */
+  const footnotes = new Map();
+
+  doc.querySelectorAll('[id^="footnote-"]').forEach(note => {
+    /*
+     * Do not mistake Mammoth's footnote reference anchors
+     * (footnote-ref-N) for actual footnotes.
+     */
+    if (/^footnote-\d+$/.test(note.id)) {
+      footnotes.set(note.id, note.cloneNode(true));
+      note.remove();
+    }
+  });
+
+  /*
+   * Remove an ordered list if it became empty after its
+   * footnotes were removed.
+   */
+  doc.querySelectorAll('ol').forEach(list => {
+    if (!list.textContent.trim() && !list.querySelector('img')) {
+      list.remove();
+    }
+  });
+
+  let current = {
+    title: null,
+    nodes: []
+  };
+
+  const isBreak = el => {
+    if (mode === 'h1') {
+      return el.tagName === 'H1';
+    }
+
+    if (mode === 'h12') {
+      return ['H1', 'H2'].includes(el.tagName);
+    }
+
+    return false;
+  };
+
+  const hasContent = chapter =>
+    chapter.nodes.some(node =>
+      node.textContent?.trim() ||
+      node.matches?.('img,svg') ||
+      node.querySelector?.('img,svg')
+    );
+
+  [...doc.body.childNodes].forEach(node => {
+    if (
+      node.nodeType === 1 &&
+      isBreak(node)
+    ) {
+      if (hasContent(current)) {
+        chapters.push(current);
       }
 
-      if (mode === 'h12') {
-        return ['H1', 'H2'].includes(el.tagName);
-      }
+      current = {
+        title:
+          node.textContent.trim() ||
+          'Untitled',
+        nodes: [node]
+      };
+    } else {
+      current.nodes.push(node);
+    }
+  });
 
-      return false;
-    };
+  if (hasContent(current)) {
+    chapters.push(current);
+  }
 
-    const hasContent = chapter =>
-      chapter.nodes.some(node =>
-        node.textContent?.trim() ||
-        node.matches?.('img,svg') || node.querySelector?.('img,svg')
-      );
+  /*
+   * Find every footnote referenced by each chapter and
+   * append only those notes to that chapter.
+   */
+  chapters.forEach(chapter => {
+    const noteIds = new Set();
 
-    [...doc.body.childNodes].forEach(node => {
+    chapter.nodes.forEach(node => {
+      if (node.nodeType !== 1) return;
+
+      const links = [];
+
       if (
-        node.nodeType === 1 &&
-        isBreak(node)
+        node.matches?.('a[href^="#footnote-"]')
       ) {
-        if (hasContent(current)) {
-          chapters.push(current);
-        }
+        links.push(node);
+      }
 
-        current = {
-          title:
-            node.textContent.trim() ||
-            'Untitled',
-          nodes: [node]
-        };
-      } else {
-        current.nodes.push(node);
+      node
+        .querySelectorAll?.('a[href^="#footnote-"]')
+        .forEach(link => links.push(link));
+
+      links.forEach(link => {
+        const href =
+          link.getAttribute('href');
+
+        const id =
+          href?.slice(1);
+
+        if (
+          id &&
+          footnotes.has(id)
+        ) {
+          noteIds.add(id);
+        }
+      });
+    });
+
+    if (!noteIds.size) return;
+
+    const section =
+      doc.createElement('section');
+
+    section.className =
+      'ec-chapter-footnotes';
+
+    const list =
+      doc.createElement('ol');
+
+    noteIds.forEach(id => {
+      const note =
+        footnotes.get(id);
+
+      if (note) {
+        list.appendChild(
+          note.cloneNode(true)
+        );
       }
     });
 
-    if (hasContent(current)) {
-      chapters.push(current);
-    }
+    section.appendChild(list);
+    chapter.nodes.push(section);
+  });
 
-    return chapters;
-  }
+  return chapters;
+}
 
   function chapterTitle(chapter, index) {
     return (
