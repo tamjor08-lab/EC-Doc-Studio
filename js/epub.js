@@ -884,8 +884,8 @@ function split(doc, mode) {
               )
           }
         );
-     const footnoteDebug = result.value.match(/.{0,250}footnote.{0,500}/gi);
-console.log('MAMMOTH FOOTNOTE HTML:', footnoteDebug);
+    const captionDebug = result.value.match(/.{0,500}(?:ec-word-caption|caption).{0,500}/gi);
+    console.log('MAMMOTH CAPTION HTML:', captionDebug);
       st.html =
         normalizeFigures(
           result.value || ''
