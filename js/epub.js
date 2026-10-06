@@ -172,6 +172,7 @@
           endEdit();
           st.current = index;
           render();
+          $('#bookPage').scrollIntoView({ behavior: 'smooth', block: 'start' }); 
         };
 
         toc.appendChild(button);
@@ -1751,6 +1752,7 @@
         endEdit();
         st.current--;
         render();
+        $('#bookPage').scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
     };
   }
@@ -1764,6 +1766,7 @@
         endEdit();
         st.current++;
         render();
+       $('#bookPage').scrollIntoView({ behavior: 'smooth', block: 'start' }); 
       }
     };
   }
