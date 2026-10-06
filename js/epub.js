@@ -790,7 +790,7 @@ function split(doc, mode) {
               )
           }
         );
-
+        console.log('MAMMOTH RAW HTML:', result.value);
       st.html =
         normalizeFigures(
           result.value || ''
