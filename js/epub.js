@@ -944,20 +944,7 @@ function split(doc, mode) {
               )
           }
         );
-       const figureMatches =
-  [...result.value.matchAll(
-    /.{0,1200}Figure 1 List of Nations.{0,500}/gi
-  )];
-
-console.log(
-  'FIGURE 1 MATCH COUNT:',
-  figureMatches.length
-);
-
-console.log(
-  'FIGURE 1 ACTUAL:',
-  figureMatches.at(-1)?.[0]
-);
+      
       st.html =
         normalizeFigures(
           result.value || ''
