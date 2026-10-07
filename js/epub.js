@@ -53,6 +53,13 @@
 function split(doc, mode) {
   const chapters = [];
 
+  // Make PDF page headings visible to the chapter splitter.
+  doc.querySelectorAll('section.pdf-import-page').forEach(page => {
+    const marker = doc.createElement('span');
+    marker.dataset.pdfPage = page.dataset.pdfPage;
+    page.replaceWith(marker, ...page.childNodes);
+  });
+
   /*
    * Mammoth puts DOCX footnotes into one ordered list at
    * the end of the converted document. Save those notes
@@ -61,11 +68,12 @@ function split(doc, mode) {
   const footnotes = new Map();
 
   doc.querySelectorAll('[id^="footnote-"]').forEach(note => {
+    if (note.dataset.pdfNote) return;
     /*
      * Do not mistake Mammoth's footnote reference anchors
      * (footnote-ref-N) for actual footnotes.
      */
-    if (/^footnote-\d+$/.test(note.id)) {
+    if (/^footnote-\d+(?:-pdf-\d+)?$/.test(note.id)) {
       footnotes.set(note.id, note.cloneNode(true));
       note.remove();
     }
@@ -82,7 +90,7 @@ function split(doc, mode) {
   });
 
   let current = {
-    title: null,
+    title: doc.querySelector('[data-pdf-page]') ? 'Front matter' : null,
     nodes: []
   };
 
@@ -134,6 +142,29 @@ function split(doc, mode) {
    * append only those notes to that chapter.
    */
   chapters.forEach(chapter => {
+    const pdfNotes = chapter.nodes.filter(node => node.matches?.('ol') && node.querySelector('[data-pdf-note]'));
+    if (pdfNotes.length) {
+      chapter.nodes = chapter.nodes.filter(node => !pdfNotes.includes(node));
+      const section = doc.createElement('section'); section.className = 'ec-chapter-footnotes';
+      const heading = doc.createElement('h2'); heading.textContent = 'Notes'; section.appendChild(heading);
+      pdfNotes.forEach(list => section.appendChild(list)); chapter.nodes.push(section);
+    }
+    const pdfIds = new Set(pdfNotes.flatMap(list => [...list.querySelectorAll('[id]')].map(note => note.id)));
+    for (const node of chapter.nodes) for (const link of node.querySelectorAll?.('[data-pdf-reference]') || []) {
+      if (!pdfIds.has(link.getAttribute('href')?.slice(1))) link.replaceWith(doc.createTextNode(link.textContent));
+    }
+    const pdfReferences = chapter.nodes.flatMap(node => [...(node.querySelectorAll?.('[data-pdf-reference]') || [])]);
+    for (const list of pdfNotes) for (const note of list.querySelectorAll('[data-pdf-note]')) {
+      note.querySelectorAll('[data-pdf-backlink]').forEach(link => link.remove());
+      const references = pdfReferences.filter(link => link.getAttribute('href') === '#'+note.id);
+      references.forEach((reference,index) => {
+        const back = doc.createElement('a'); back.href = '#'+reference.id;
+        back.dataset.pdfBacklink = 'true';
+        back.textContent = references.length === 1 ? ' ↑ Back to reading' : ' ↑'+(index+1);
+        back.setAttribute('aria-label','Back to reading'+(references.length > 1 ? ', reference '+(index+1) : ''));
+        note.appendChild(back);
+      });
+    }
     const noteIds = new Set();
 
     chapter.nodes.forEach(node => {
@@ -236,6 +267,22 @@ function split(doc, mode) {
     render();
   }
 
+  function showChapter(index) {
+    if (index < 0 || index >= st.chapters.length) return;
+    endEdit();
+    st.current = index;
+    // A note's URL fragment belongs to the old chapter.
+    if (location.hash) history.replaceState(null, '', location.pathname+location.search);
+    render();
+    const page = $('#bookPage');
+    if (page) {
+      page.scrollTop = 0;
+      // The reader grows with its content, so the browser window (or an
+      // outer scrolling container) must also return to the chapter start.
+      page.scrollIntoView({block:'start', behavior:'instant'});
+    }
+  }
+
   function render() {
     const toc = $('#bookToc');
     const page = $('#bookPage');
@@ -263,10 +310,7 @@ function split(doc, mode) {
             : '';
 
         button.onclick = () => {
-          endEdit();
-          st.current = index;
-          render();
-         $('#bookPage').scrollTop = 0; 
+          showChapter(index);
         };
 
         toc.appendChild(button);
@@ -558,6 +602,54 @@ function split(doc, mode) {
   return doc.body.innerHTML;
 }
   
+  async function pdfPictures(page, pageNumber) {
+    const ops = await page.getOperatorList();
+    const names = pdfjsLib.OPS;
+    let matrix = [1, 0, 0, 1, 0, 0];
+    const stack = [], boxes = [];
+    for (let i = 0; i < ops.fnArray.length; i++) {
+      const fn = ops.fnArray[i], args = ops.argsArray[i];
+      if (fn === names.save) stack.push([...matrix]);
+      else if (fn === names.restore) matrix = stack.pop() || [1, 0, 0, 1, 0, 0];
+      else if (fn === names.transform) matrix = pdfjsLib.Util.transform(matrix, args);
+      else if (fn === names.paintFormXObjectBegin) {
+        stack.push([...matrix]);
+        if (args[0]) matrix = pdfjsLib.Util.transform(matrix, args[0]);
+      } else if (fn === names.paintFormXObjectEnd) matrix = stack.pop() || matrix;
+      else if ([names.paintImageXObject, names.paintInlineImageXObject, names.paintImageMaskXObject].includes(fn)) {
+        const points = [[0,0],[1,0],[0,1],[1,1]].map(p => pdfjsLib.Util.applyTransform(p, matrix));
+        const x = Math.min(...points.map(p => p[0])), y = Math.min(...points.map(p => p[1]));
+        const right = Math.max(...points.map(p => p[0])), top = Math.max(...points.map(p => p[1]));
+        if (right-x > 8 && top-y > 8) boxes.push({x, y, right, top});
+      }
+    }
+    if (!boxes.length) return [];
+    const viewport = page.getViewport({scale: 1.5});
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width); canvas.height = Math.ceil(viewport.height);
+    await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+    const pictures = [];
+    for (const box of boxes) {
+      const rect = viewport.convertToViewportRectangle([box.x, box.y, box.right, box.top]);
+      const left = Math.max(0, Math.floor(Math.min(rect[0], rect[2])));
+      const top = Math.max(0, Math.floor(Math.min(rect[1], rect[3])));
+      const width = Math.min(canvas.width-left, Math.ceil(Math.abs(rect[2]-rect[0])));
+      const height = Math.min(canvas.height-top, Math.ceil(Math.abs(rect[3]-rect[1])));
+      if (width <= 0 || height <= 0) continue;
+      const crop = document.createElement('canvas'); crop.width = width; crop.height = height;
+      crop.getContext('2d').drawImage(canvas, left, top, width, height, 0, 0, width, height);
+      const blob = await new Promise(resolve => crop.toBlob(resolve, 'image/png'));
+      if (!blob) throw new Error('Could not preserve a PDF picture on page '+pageNumber);
+      const path = `images/pdf-${pageNumber}-${pictures.length+1}.png`;
+      st.images.set(path, {buf: await blob.arrayBuffer(), mime: 'image/png', url: URL.createObjectURL(blob)});
+      const figure = document.createElement('figure'); figure.className = 'ec-figure';
+      const image = document.createElement('img'); image.src = st.images.get(path).url; image.alt = 'Picture from PDF page '+pageNumber;
+      figure.appendChild(image); pictures.push({figure, y:box.top, x:box.x, right:box.right, bottom:box.y});
+    }
+    canvas.width = canvas.height = 0;
+    return pictures;
+  }
+
   async function openPdf(file) {
     if (!file) return;
 
@@ -596,6 +688,9 @@ function split(doc, mode) {
         .promise;
 
       const pages = [];
+      let expectedChapter = 1;
+      let importedFootnotes = 0;
+      let referenceSerial = 0;
 
       for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
         status(
@@ -604,6 +699,8 @@ function split(doc, mode) {
 
         const page = await pdf.getPage(pageNumber);
         const textContent = await page.getTextContent();
+        const viewport = page.getViewport({scale:1});
+        const pictures = await pdfPictures(page, pageNumber);
 
         const items = textContent.items
           .filter(item => item.str && item.str.trim())
@@ -611,6 +708,7 @@ function split(doc, mode) {
             text: item.str.trim(),
             x: item.transform[4],
             y: item.transform[5],
+            width: item.width || 0,
             height:
               Math.abs(item.height) ||
               Math.abs(item.transform[3]) ||
@@ -638,7 +736,7 @@ function split(doc, mode) {
           let line = lines.find(
             existing =>
               Math.abs(existing.y - item.y) <=
-              Math.max(3, item.height * 0.3)
+              Math.max(3, item.height * 0.6)
           );
 
           if (!line) {
@@ -659,6 +757,40 @@ function split(doc, mode) {
         });
 
         lines.sort((a, b) => b.y - a.y);
+        // Weight type size by text length: a caption or URL may be split
+        // into many tiny items and should not outweigh the page's prose.
+        const heightWeights = new Map();
+        for (const item of items) {
+          const height = Math.round(item.height*10)/10;
+          heightWeights.set(height, (heightWeights.get(height)||0)+item.text.length);
+        }
+        const bodyHeight = [...heightWeights].sort((a,b)=>b[1]-a[1])[0]?.[0] || 12;
+        const textOf = line => line.items.slice().sort((a,b)=>a.x-b.x).map(item=>item.text).join(' ').replace(/\s+/g,' ').trim();
+        const textHeight = line => line.items.reduce((total,item)=>total+item.height*item.text.length,0) /
+          Math.max(1,line.items.reduce((total,item)=>total+item.text.length,0));
+        // A centered, isolated number in the footer is pagination, not a reference.
+        const contentLines = lines.filter(line => !(
+          /^\d+$/.test(textOf(line)) && line.y < viewport.height*0.08 &&
+          Math.abs(line.items[0].x-viewport.width/2) < viewport.width*0.12
+        ));
+        const noteStart = contentLines.findIndex(line =>
+          line.y < viewport.height*0.2 && textHeight(line) < bodyHeight*0.98 &&
+          line.items[0].x < viewport.width*0.15 &&
+          line.items[0].height < bodyHeight*0.8 &&
+          /^\d+\s+\S/.test(textOf(line))
+        );
+        const noteLines = noteStart < 0 ? [] : contentLines.splice(noteStart);
+        let note = null;
+        const pageNotes = [];
+        for (const line of noteLines) {
+          const text = textOf(line), match = text.match(/^(\d+)\s+(.+)/);
+          if (match && line.items[0].x < viewport.width*0.15 && line.items[0].height < bodyHeight*0.8) {
+            note = document.createElement('li'); note.id = 'footnote-'+match[1]+'-pdf-'+pageNumber;
+            note.value = Number(match[1]);
+            note.dataset.pdfNote = 'true'; note.textContent = match[2]; pageNotes.push(note);
+            importedFootnotes++;
+          } else if (note) note.textContent += ' '+text;
+        }
 
         const pageElement =
           document.createElement('section');
@@ -669,8 +801,55 @@ function split(doc, mode) {
         let previousLine = null;
         let paragraph = null;
 
-        lines.forEach(line => {
+        contentLines.forEach((line, lineIndex) => {
           line.items.sort((a, b) => a.x - b.x);
+          const joined = [];
+          for (const item of line.items) {
+            const previous = joined[joined.length-1];
+            if (previous && previous.text === 'F' && /^igure\b/.test(item.text) &&
+              Math.abs(previous.y-item.y) < 1 && Math.abs(previous.height-item.height) < 0.5 &&
+              item.x-(previous.x+previous.width) >= -0.5 && item.x-(previous.x+previous.width) < 0.7) {
+              previous.text += item.text;
+              previous.width = item.x+item.width-previous.x;
+            } else joined.push({...item});
+          }
+          line.items = joined;
+
+          // Captions beside wrapping prose must be separated by position,
+          // otherwise a figure number can look like a raised footnote.
+          let captionIndex = line.items.findIndex(item => /^(?:Figure|Fig\.)\s*(?:\d+\b.*)?$/i.test(item.text));
+          while (captionIndex >= 0) {
+            const first = line.items[captionIndex];
+            const picture = pictures.filter(p => !p.figure.querySelector('figcaption') && first.x >= p.x-100 && first.x <= p.right+40 &&
+              p.bottom-line.y >= -40 && p.bottom-line.y <= 80)
+              .sort((a,b)=>(Math.abs(a.bottom-line.y)+Math.max(0,a.x-first.x))-
+                (Math.abs(b.bottom-line.y)+Math.max(0,b.x-first.x)))[0];
+            if (picture) {
+              const nextCaption = line.items.findIndex((item,index)=>index > captionIndex && /^(?:Figure|Fig\.)\s*(?:\d+\b.*)?$/i.test(item.text));
+              const captionItems = line.items.slice(captionIndex,nextCaption < 0 ? undefined : nextCaption)
+                .filter(item => item.x <= picture.right+60 && item.height <= first.height*1.2);
+              let caption = picture.figure.querySelector('figcaption');
+              if (!caption) {caption = document.createElement('figcaption');picture.figure.appendChild(caption);}
+              caption.textContent = captionItems.map(item=>item.text).join(' ').replace(/\s+/g,' ').trim();
+              picture.captionY = line.y;
+              picture.captionHeight = captionItems.reduce((n,item)=>n+item.height,0)/captionItems.length;
+              line.items = line.items.filter(item => !captionItems.includes(item));
+              if (!line.items.length) return;
+              line.height = Math.max(...line.items.map(item=>item.height));
+            } else break;
+            captionIndex = line.items.findIndex(item => /^(?:Figure|Fig\.)\s*(?:\d+\b.*)?$/i.test(item.text));
+          }
+          for (const picture of pictures) {
+            if (picture.captionY == null || line.y >= picture.captionY || picture.captionY-line.y > picture.captionHeight*1.8) continue;
+            const continuation = line.items.filter(item => item.x >= picture.x-60 && item.x+item.width <= picture.right+60 &&
+              item.height <= picture.captionHeight*1.12);
+            if (!continuation.length) continue;
+            picture.figure.querySelector('figcaption').appendChild(document.createTextNode(' '+continuation.map(item=>item.text).join(' ')));
+            picture.captionY = line.y;
+            line.items = line.items.filter(item=>!continuation.includes(item));
+          }
+          if (!line.items.length) return;
+          line.height = Math.max(...line.items.map(item=>item.height));
 
           const text = line.items
             .map(item => item.text)
@@ -696,11 +875,19 @@ function split(doc, mode) {
             averageHeight >= 16 &&
             text.length <= 120;
 
-          if (looksLikeHeading) {
+          const chapterMatch = text.match(/^chapter\s+(\d+)\s*[:.\-–—]/i);
+          const looksLikeChapter =
+            lineIndex === 0 &&
+            chapterMatch && Number(chapterMatch[1]) === expectedChapter &&
+            text.length <= 160;
+
+          if (looksLikeHeading || looksLikeChapter) {
+            if (looksLikeChapter) expectedChapter++;
             const heading =
-              document.createElement('h2');
+              document.createElement(looksLikeChapter ? 'h1' : 'h2');
 
             heading.textContent = text;
+            heading.dataset.pdfY = String(line.y);
             pageElement.appendChild(heading);
 
             paragraph = null;
@@ -722,39 +909,52 @@ function split(doc, mode) {
           const startsNewParagraph =
             !paragraph ||
             !previousLine ||
+            /^(?:Figure|Fig\.)\s*\d+/i.test(text) ||
+            pictures.some(picture => previousLine.y > picture.y && line.y <= picture.y) ||
             gap > normalGap * 1.65;
 
           if (startsNewParagraph) {
             paragraph =
               document.createElement('p');
 
-            paragraph.textContent = text;
+            paragraph.textContent = '';
 
             pageElement.appendChild(
               paragraph
             );
-          } else {
-            const oldText =
-              paragraph.textContent;
-
-            /*
-             * Rejoin words broken with a hyphen at the end of
-             * a PDF line when it looks like ordinary word wrapping.
-             */
-            if (
-              /[A-Za-z]-$/.test(oldText) &&
-              /^[a-z]/.test(text)
-            ) {
-              paragraph.textContent =
-                oldText.slice(0, -1) + text;
-            } else {
-              paragraph.textContent =
-                oldText + ' ' + text;
-            }
+          } else paragraph.appendChild(document.createTextNode(' '));
+          for (const item of line.items) {
+            const baseline = Math.min(...line.items.filter(i => i.height >= line.height*0.9).map(i => i.y));
+            const reference = /^\d+$/.test(item.text) && item.height < line.height*0.82 && item.y > baseline+1 &&
+              !/(?:Figure|Fig\.)\s*$/i.test(paragraph.textContent);
+            if (reference) {
+              const sup = document.createElement('sup'), link = document.createElement('a');
+              link.href = '#footnote-'+item.text+'-pdf-'+pageNumber; link.id = 'footnote-ref-'+pageNumber+'-'+(++referenceSerial);
+              link.dataset.pdfReference = item.text;
+              link.textContent = item.text; sup.appendChild(link); paragraph.appendChild(sup);
+            } else paragraph.appendChild(document.createTextNode((paragraph.textContent && !/\s$/.test(paragraph.textContent) ? ' ' : '')+item.text));
           }
+          paragraph.dataset.pdfY ||= String(line.y);
 
           previousLine = line;
         });
+
+        // Place pictures by their original vertical position, pairing a
+        // nearby caption where it is a separate paragraph.
+        for (const picture of pictures.sort((a,b)=>b.y-a.y)) {
+          const following = [...pageElement.children].find(el => Number(el.dataset.pdfY || 0) < picture.y);
+          pageElement.insertBefore(picture.figure, following || null);
+          if (!picture.figure.querySelector('figcaption') && following &&
+            picture.bottom-Number(following.dataset.pdfY) >= -8 &&
+            picture.bottom-Number(following.dataset.pdfY) <= 40 &&
+            /^(?:Figure|Fig\.)\s*\d+/i.test(following.textContent.trim())) {
+            const caption = document.createElement('figcaption'); caption.innerHTML = following.innerHTML;
+            picture.figure.appendChild(caption); following.remove();
+          }
+        }
+        if (pageNotes.length) {
+          const notes = document.createElement('ol'); notes.append(...pageNotes); pageElement.appendChild(notes);
+        }
 
         if (!pageElement.childNodes.length) {
           const empty =
@@ -769,6 +969,17 @@ function split(doc, mode) {
         pages.push(pageElement);
       }
 
+      // A reference and its footnote can occur on different PDF pages.
+      const notesByNumber = new Map();
+      for (const page of pages) for (const note of page.querySelectorAll('[data-pdf-note]')) {
+        notesByNumber.set(String(note.value), note.id);
+      }
+      for (const page of pages) for (const link of page.querySelectorAll('[data-pdf-reference]')) {
+        const id = notesByNumber.get(link.dataset.pdfReference);
+        if (id) link.href = '#'+id;
+        else link.replaceWith(document.createTextNode(link.textContent));
+      }
+
       /*
        * PDF import produces editable HTML. Page markers are kept
        * in the HTML so the original page progression is not lost,
@@ -777,13 +988,15 @@ function split(doc, mode) {
       st.html = pages
         .map(page => page.outerHTML)
         .join('\n');
+      // Keep temporary preview links out of the saved book model.
+      for (const [path, image] of st.images) st.html = st.html.replaceAll(image.url, path);
 
       st.notes.push(
         'PDFs store text by position rather than as paragraphs. EC Doc Studio reconstructed the text into editable paragraphs; check line breaks, headings, columns, and special formatting before saving the EPUB.'
       );
 
       st.notes.push(
-        'PDF pictures are not automatically transferred by this importer yet. The PDF text is editable, but image-heavy PDFs should be checked against the original.'
+        `Preserved ${st.images.size} PDF pictures as PNG crops. Detected ${importedFootnotes} page footnotes; check their references and chapter-end notes against the original PDF. Complex columns and captions may still need review.`
       );
 
       const titleField =
@@ -1769,7 +1982,7 @@ function split(doc, mode) {
           await loadImage(imagePath, mime);
         }
         chapters.push({path, source, edited:false,
-          title:doc.querySelector('h1,h2,h3')?.textContent.trim() || 'Chapter ' + (chapters.length + 1),
+          title:doc.querySelector('h1,h2,h3')?.textContent.trim() || doc.querySelector('title')?.textContent.trim() || 'Chapter ' + (chapters.length + 1),
           nodes:[...body.childNodes].map(node => document.importNode(node, true))});
       }
       if (!chapters.length) throw new Error('No readable chapters were found.');
@@ -1903,10 +2116,7 @@ function split(doc, mode) {
   if (prev) {
     prev.onclick = () => {
       if (st.current > 0) {
-        endEdit();
-        st.current--;
-        render();
-        $('#bookPage').scrollTop = 0;
+        showChapter(st.current-1);
       }
     };
   }
@@ -1917,10 +2127,7 @@ function split(doc, mode) {
         st.current <
         st.chapters.length - 1
       ) {
-        endEdit();
-        st.current++;
-        render();
-      $('#bookPage').scrollTop = 0;
+        showChapter(st.current+1);
       }
     };
   }
