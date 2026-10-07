@@ -214,8 +214,13 @@ function split(doc, mode) {
         footnotes.get(id);
 
       if (note) {
+        // Keep Mammoth's document-wide numbers when a chapter's list
+        // begins with a later footnote instead of restarting at one.
+        const number = Number(id.match(/^footnote-(\d+)$/)?.[1]);
+        const chapterNote = note.cloneNode(true);
+        if (number > 0) chapterNote.value = number;
         list.appendChild(
-          note.cloneNode(true)
+          chapterNote
         );
       }
     });
